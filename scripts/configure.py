@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 from pathlib import Path
+from decimal import Decimal
 from urllib.parse import urlsplit
 
 
@@ -52,7 +53,7 @@ def configure(env_file, check_only=False, infrastructure_only=False):
             required.append(prefix + "_API_KEY")
             required.extend([prefix + "_INPUT_USD_PER_MILLION", prefix + "_OUTPUT_USD_PER_MILLION"])
         endpoint = urlsplit(cfg.get(prefix + "_API_BASE", ""))
-        if endpoint.scheme != "https" or not endpoint.hostname or endpoint.username:
+        if endpoint.scheme != "https" or not endpoint.hostname or endpoint.username or endpoint.query or endpoint.fragment:
             raise ValueError(prefix + "_API_BASE must be an HTTPS API base URL")
         if "coding" in endpoint.path.lower() or "coding" in endpoint.hostname:
             raise ValueError(prefix + "_API_BASE must use standard inference, not Coding Plan")
@@ -126,8 +127,14 @@ def configure(env_file, check_only=False, infrastructure_only=False):
             if costs:
                 model["model_info"] = {"mode": "chat", **costs}
             models.append(model)
-            chat_models.append({"id": alias, "name": cfg[prefix + "_MODEL"], "provider": provider})
-    config = {"model_list": models, "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY", "database_url": "os.environ/DATABASE_URL", "store_model_in_db": False}, "litellm_settings": {"drop_params": False, "num_retries": 0, "set_verbose": False, "json_logs": True, "turn_off_message_logging": True}, "router_settings": {"num_retries": 0, "timeout": int(cfg.get("MODEL_REQUEST_TIMEOUT", "90"))}}
+            display = {"id": alias, "name": cfg[prefix + "_MODEL"], "provider": provider,
+                       "api_base": cfg[prefix + "_API_BASE"], "usd_cny_rate": "7"}
+            for direction in ("INPUT", "OUTPUT"):
+                price = cfg.get(prefix + "_" + direction + "_USD_PER_MILLION", "")
+                if valid(price):
+                    display[direction.lower() + "_cny_per_million"] = str((Decimal(price) * 7).quantize(Decimal("0.000001")))
+            chat_models.append(display)
+    config = {"model_list": models, "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY", "database_url": "os.environ/DATABASE_URL", "store_model_in_db": True}, "litellm_settings": {"drop_params": False, "num_retries": 0, "set_verbose": False, "json_logs": True, "turn_off_message_logging": True}, "router_settings": {"num_retries": 0, "timeout": int(cfg.get("MODEL_REQUEST_TIMEOUT", "90"))}}
     if fallback:
         config["router_settings"]["fallbacks"] = [{"learning-agent": ["learning-fallback"]}]
     Path(".runtime/litellm.json").write_text(json.dumps(config, ensure_ascii=False, indent=2))

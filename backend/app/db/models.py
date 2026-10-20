@@ -63,6 +63,26 @@ class Session(Entity, Base):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class ModelConfig(Entity, Base):
+    __tablename__ = "model_configs"
+    name: Mapped[str] = mapped_column(String(100))
+    provider: Mapped[str] = mapped_column(String(20))
+    model_id: Mapped[str] = mapped_column(String(200))
+    api_base: Mapped[str] = mapped_column(String(500))
+    input_cny_per_million: Mapped[str] = mapped_column(String(30))
+    output_cny_per_million: Mapped[str] = mapped_column(String(30))
+    usd_cny_rate: Mapped[str] = mapped_column(String(30))
+    gateway_alias: Mapped[str] = mapped_column(String(100))
+    credential_name: Mapped[str] = mapped_column(String(100))
+    aliases: Mapped[list] = mapped_column(J, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    last_request_key: Mapped[str] = mapped_column(String(160))
+    last_request_hash: Mapped[str] = mapped_column(String(64))
+    last_test_key: Mapped[str | None] = mapped_column(String(160))
+    test_result: Mapped[dict | None] = mapped_column(J)
+
+
 class LoginAttempt(Entity, Base):
     __tablename__ = "login_attempts"
     key_hash: Mapped[str] = mapped_column(String(64), index=True)

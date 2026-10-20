@@ -135,7 +135,7 @@ services:
       - ./deploy/litellm/start.py:/deploy/start.py:ro
       - ./.runtime/litellm.json:/etc/litellm/config.json:ro
     environment:
-      STORE_MODEL_IN_DB: "False"
+      STORE_MODEL_IN_DB: "True"
       LITELLM_LOG: WARNING
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       NO_DOCS: "True"
@@ -219,6 +219,11 @@ services:
     stop_grace_period: 90s
   api:
     <<: *app
+    environment:
+      <<: *app-env
+      APP_MODEL_ADMIN_USERNAME: ${BOOTSTRAP_USERNAME:-learner}
+      LITELLM_ADMIN_KEY_PATH: /run/secrets/litellm_master_key
+    secrets: [app_db_password, litellm_master_key]
     depends_on:
       app-bootstrap: {condition: service_completed_successfully}
     healthcheck:

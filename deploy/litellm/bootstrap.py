@@ -38,7 +38,10 @@ try:
             if error.code not in (401, 403):
                 raise
             exists = False
-        body = {"key": key, "key_alias": "learning-" + service, "models": ["learning-agent", "learning-fallback"], "max_budget": float(os.environ[env]), "budget_duration": "30d", "rpm_limit": 30, "tpm_limit": 100000, "metadata": {"service": service}}
+        models = ["learning-agent", "learning-fallback"]
+        if service == "app":
+            models.append("learning-configured")
+        body = {"key": key, "key_alias": "learning-" + service, "models": models, "max_budget": float(os.environ[env]), "budget_duration": "30d", "rpm_limit": 30, "tpm_limit": 100000, "metadata": {"service": service}}
         request("/key/update" if exists else "/key/generate", body)
     print("Restricted application and memory gateway keys are ready.")
 except Exception:

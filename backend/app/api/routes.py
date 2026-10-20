@@ -419,12 +419,12 @@ async def messages(
         }
 
 
-def conversation_model_json(conversation):
-    from app.integrations.model_catalog import configured_models
+async def conversation_model_json(db, conversation):
+    from app.integrations.model_catalog import available_models
     from app.integrations.settings import runtime_settings
 
     return {
-        "items": configured_models(),
+        "items": await available_models(db),
         "model_id": conversation.model_alias or runtime_settings().litellm_model_alias,
         "version": conversation.model_version,
     }
@@ -434,19 +434,19 @@ def conversation_model_json(conversation):
 async def conversation_model(conversation_id: str, user=Depends(current_user)):
     async with SessionFactory() as db:
         conversation = await owned(db, Conversation, conversation_id, user.id)
-        return conversation_model_json(conversation)
+        return await conversation_model_json(db, conversation)
 
 
 @router.patch("/conversations/{conversation_id}/model")
 async def select_conversation_model(
     conversation_id: str, payload: ConversationModelInput, user=Depends(current_user)
 ):
-    from app.integrations.model_catalog import resolve_model
+    from app.integrations.model_catalog import selected_model
 
     async with SessionFactory() as db, db.begin():
         current, stream = await lock_user(db, user.id)
         conversation = await owned(db, Conversation, conversation_id, user.id)
-        alias = resolve_model(payload.model_id)
+        alias = await selected_model(db, payload.model_id)
         # A repeated selection is harmless, including a retry after a lost response.
         if conversation.model_alias != alias:
             version(conversation.model_version, payload.expected_version)
@@ -455,7 +455,7 @@ async def select_conversation_model(
             await emit(db, stream, "conversation.model_changed", conversation.id,
                        "对话模型已更新，将用于新的回复", conversation.goal_id,
                        entity_version=conversation.model_version)
-        return conversation_model_json(conversation)
+        return await conversation_model_json(db, conversation)
 
 
 @router.get("/conversations/{conversation_id}/goal-drafts")

@@ -1,4 +1,4 @@
-export interface User { id: string; username: string; timezone: string; daily_minutes: number; availability_version: number; memory_control_revision: number; proactive_enabled: boolean; quiet_start: number; quiet_end: number; learning_hour: number }
+export interface User { id: string; username: string; timezone: string; daily_minutes: number; availability_version: number; memory_control_revision: number; proactive_enabled: boolean; quiet_start: number; quiet_end: number; learning_hour: number; can_manage_models?: boolean }
 export type GoalStatus = 'draft' | 'active' | 'paused' | 'completed' | 'cancelled'
 export type TaskStatus = 'ready' | 'in_progress' | 'awaiting_review' | 'needs_revision' | 'completed' | 'skipped' | 'cancelled'
 export type OperationStatus = 'accepted' | 'running' | 'waiting_user' | 'succeeded' | 'failed' | 'superseded' | 'cancelled'
@@ -16,6 +16,11 @@ export type Settings = User
 export interface Memory { id: string; content: string; source_type: string; status: string; suppressed: boolean; deleted: boolean; created_at: string }
 export interface Conversation { id: string; goal_id: string | null; last_seq: number; read_seq: number; unread_count: number }
 export interface ConversationModels { items: { id: string; name: string; provider: 'bailian' | 'zhipu' | 'ark' | 'gateway' }[]; model_id: string; version: number }
+export type ModelProvider = 'bailian' | 'zhipu' | 'ark'
+export interface ModelConfigInput { name: string; provider: ModelProvider; model_id: string; api_base: string; api_key?: string; input_cny_per_million: string; output_cny_per_million: string; usd_cny_rate: string; expected_version: number; source_model_id?: string }
+export interface ModelConfig extends Omit<ModelConfigInput, 'api_key' | 'expected_version' | 'source_model_id'> { id: string; enabled: boolean; version: number; key_configured: boolean; created_at: string; test_result: { status: 'passed' | 'failed'; message: string; at: string; estimated_cost_cny?: string; input_tokens?: number; output_tokens?: number } | null }
+export interface PresetModel { id: string; name: string; provider: ModelProvider | 'gateway'; api_base: string | null; input_cny_per_million: string | null; output_cny_per_million: string | null; usd_cny_rate: string }
+export interface ModelConfigs { items: ModelConfig[]; presets: PresetModel[] }
 export interface Bootstrap { task_counts?: { awaiting_review: number }; user: User; cursor: number; goals: Goal[]; tasks: Task[]; operations: Operation[]; events: Activity[]; budget: DailyBudget; conversations: Conversation[] }
 export interface GoalDetail { goal: Goal; plans: Plan[]; milestones: Milestone[]; tasks: Task[]; evaluations: Evaluation[]; submissions: Submission[]; skills: { id: string; name: string; status: string; evaluation_id: string | null; review_at: string | null }[]; operations: Operation[]; conversation: Conversation }
 export interface Accepted { operation_id: string; status: string; resource_id?: string }

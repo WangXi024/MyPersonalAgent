@@ -68,8 +68,12 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(json.loads(config)["model_list"][0]["model_info"]["input_cost_per_token"], 0.000002)
         catalog = Path(".runtime/chat-models.json")
         self.assertEqual(json.loads(catalog.read_text()), [
-            {"id": "learning-agent", "name": "unit-test-model", "provider": "bailian"},
+            {"id": "learning-agent", "name": "unit-test-model", "provider": "bailian",
+             "api_base": "https://example.test/v1", "usd_cny_rate": "7",
+             "input_cny_per_million": "14.000000", "output_cny_per_million": "28.000000"},
         ])
+        self.assertTrue(json.loads(config)["general_settings"]["store_model_in_db"])
+        self.assertNotIn("unit-test-non-secret", catalog.read_text())
         self.assertEqual(catalog.stat().st_mode & 0o777, 0o444)
 
     def test_catalog_only_lists_enabled_primary_and_verified_fallback(self):
@@ -78,7 +82,8 @@ class ConfigurationTests(unittest.TestCase):
         self.run_configure()
         models = json.loads(Path(".runtime/chat-models.json").read_text())
         self.assertEqual([item["id"] for item in models], ["learning-agent", "learning-fallback"])
-        self.assertEqual(models[1], {"id": "learning-fallback", "name": "test-fallback", "provider": "zhipu"})
+        self.assertEqual(models[1], {"id": "learning-fallback", "name": "test-fallback", "provider": "zhipu",
+                                    "api_base": "https://example.test/v1", "usd_cny_rate": "7"})
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-import type { Accepted, Bootstrap, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, Operation, Settings, User } from './types'
+import type { Accepted, Bootstrap, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, Operation, Settings, User } from './types'
 
 let csrfToken = ''
 export class ApiError extends Error {
@@ -41,6 +41,10 @@ export const api = {
   messages: (id: string, after = 0) => request<MessagesResponse>(`/conversations/${encodeURIComponent(id)}/messages?after=${after}&limit=100`),
   conversationModels: (id: string) => request<ConversationModels>(`/conversations/${encodeURIComponent(id)}/model`),
   selectConversationModel: (id: string, modelId: string, expectedVersion: number, key: string) => request<ConversationModels>(`/conversations/${encodeURIComponent(id)}/model`, { method: 'PATCH', body: { model_id: modelId, expected_version: expectedVersion }, key }),
+  modelConfigs: () => request<ModelConfigs>('/model-configs'),
+  saveModelConfig: (id: string | null, body: ModelConfigInput, key: string) => request<ModelConfig>(id ? `/model-configs/${encodeURIComponent(id)}` : '/model-configs', { method: id ? 'PUT' : 'POST', body, key }),
+  setModelEnabled: (id: string, enabled: boolean, version: number, key: string) => request<ModelConfig>(`/model-configs/${encodeURIComponent(id)}/enabled`, { method: 'POST', body: { enabled, expected_version: version }, key }),
+  testModelConfig: (id: string, version: number, key: string) => request<ModelConfig>(`/model-configs/${encodeURIComponent(id)}/test`, { method: 'POST', body: { expected_version: version }, key }),
   goalDrafts: (id: string) => request<{ items: GoalDraft[] }>(`/conversations/${encodeURIComponent(id)}/goal-drafts`),
   acceptGoalDraft: (id: string, body: GoalInput, key: string) => request<Accepted>(`/goal-drafts/${encodeURIComponent(id)}/accept`, { method: 'POST', body, key }),
   operation: (id: string) => request<Operation>(`/operations/${encodeURIComponent(id)}`),

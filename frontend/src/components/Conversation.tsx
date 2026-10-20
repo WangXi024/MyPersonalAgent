@@ -152,6 +152,7 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
         {models?.items.map(model => <option key={model.id} value={model.id}>{({ bailian: '百炼', zhipu: '智谱', ark: '火山方舟', gateway: '' })[model.provider]} {model.name}</option>)}
       </select></label>
       <small id={`model-hint-${goalId ?? 'assistant'}`}>{modelAction.pending ? '正在切换…' : models?.items.length === 1 ? '当前仅配置一个模型' : '用于当前对话的新回复'}</small>
+      {data?.user.can_manage_models && <Link className="text-button model-settings-link" to="/settings/models">配置模型</Link>}
     </div><div className="row spread"><small>{conversationId ? 'Ctrl / ⌘ + Enter 发送' : connectionError ? '对话暂未连接，请重试。' : '正在连接对话…'}</small><button className="send-button" aria-label="发送消息" disabled={messageAction.pending || modelAction.pending || !modelAvailable || !message.trim() || !canSend || !conversationId}>{messageAction.pending ? <LoaderCircle className="spin" size={18} /> : <ArrowUp size={20} />}</button></div><p>{workspace ? '对话和学习进度会持续保存。' : '消息会持续保存，关闭页面后也不会丢失。'}</p></form>
   </section>
 }

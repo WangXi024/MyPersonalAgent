@@ -1,4 +1,4 @@
-import { CircleHelp, Compass, LogOut, MessageCircle, Plus, Settings2, Sprout, Sun, WifiOff } from 'lucide-react'
+import { CircleHelp, Compass, Cpu, LogOut, MessageCircle, Plus, Settings2, Sprout, Sun, WifiOff } from 'lucide-react'
 import { NavLink, Outlet, Link, Navigate, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { useApp } from '../state'
@@ -22,7 +22,7 @@ export function Layout() {
       <div className="sidebar-divider" />
       <div className="row spread sidebar-caption"><span>正在前进</span><Link to="/goals/new" aria-label="新建目标"><Plus size={16} /></Link></div>
       <div className="sidebar-goals">{goals.slice(0, 5).map(goal => <NavLink key={goal.id} to={`/goals/${goal.id}`}><span className={`goal-dot ${goal.status}`} /><span>{goal.title}</span>{!!goal.unread_count && <span className="unread-pill">{goal.unread_count}</span>}</NavLink>)}{!goals.length && <p>你的第一个目标，从这里开始。</p>}</div>
-      <nav className="sidebar-bottom" aria-label="账号导航"><NavLink to="/settings"><Settings2 size={18} />偏好与记忆</NavLink></nav>
+      <nav className="sidebar-bottom" aria-label="账号导航">{data.user.can_manage_models && <NavLink to="/settings/models"><Cpu size={18} />模型配置</NavLink>}<NavLink to="/settings" end><Settings2 size={18} />偏好与记忆</NavLink></nav>
       <div className="account"><span className="avatar">{data.user.username.slice(0, 1).toUpperCase()}</span><span><strong>{data.user.username}</strong><small>个人学习空间</small></span><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={() => void signOut().catch(setLogoutError)}><LogOut size={17} /></button></div>
     </aside>
     <div className="main-shell">

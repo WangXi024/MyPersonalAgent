@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "learning-agent"
     proactive_daily_limit: int = 2
     proactive_gap_hours: int = 4
+    model_admin_username: str = ""
 
     @property
     def secure_cookies(self) -> bool:

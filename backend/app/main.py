@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.auth import router as auth_router
 from app.api.routes import router
+from app.api.model_configs import router as model_configs_router
 from app.db.session import SessionFactory, engine
 from app.domain.common import DomainError
 
@@ -22,6 +23,7 @@ async def lifespan(app):
 app = FastAPI(title="Learning Personal Agent", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1")
+app.include_router(model_configs_router, prefix="/api/v1")
 
 
 @app.middleware("http")
@@ -67,7 +69,7 @@ async def ready(request: Request):
     try:
         async with SessionFactory() as db:
             version = await db.scalar(text("SELECT version_num FROM alembic_version"))
-            if version != "0003_conversation_model":
+            if version != "0004_model_config":
                 return error(request, "migration_required", "数据库迁移未完成", 503)
         return {"status": "ready", "database": "ready", "migration": version}
     except SQLAlchemyError:
