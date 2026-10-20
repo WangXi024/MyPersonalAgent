@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,6 +13,7 @@ class RuntimeSettings(BaseSettings):
     litellm_base_url: str = "http://litellm:4000/v1"
     litellm_api_key: SecretStr = SecretStr("")
     litellm_model_alias: str = "learning-agent"
+    chat_model_catalog_path: Path | None = None
     hindsight_base_url: str = "http://hindsight:8888"
     hindsight_api_key: SecretStr = SecretStr("")
     model_output_tokens: int = Field(6000, ge=256, le=16000)

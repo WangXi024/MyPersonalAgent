@@ -193,6 +193,8 @@ class Conversation(Entity, Base):
     goal_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id"), unique=True)
     last_seq: Mapped[int] = mapped_column(Integer, default=0)
     read_seq: Mapped[int] = mapped_column(Integer, default=0)
+    model_alias: Mapped[str | None] = mapped_column(String(100))
+    model_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     __table_args__ = (
         Index(

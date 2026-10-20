@@ -66,6 +66,19 @@ class ConfigurationTests(unittest.TestCase):
         config = Path(".runtime/litellm.json").read_text()
         self.assertNotIn("unit-test-non-secret", config)
         self.assertEqual(json.loads(config)["model_list"][0]["model_info"]["input_cost_per_token"], 0.000002)
+        catalog = Path(".runtime/chat-models.json")
+        self.assertEqual(json.loads(catalog.read_text()), [
+            {"id": "learning-agent", "name": "unit-test-model", "provider": "bailian"},
+        ])
+        self.assertEqual(catalog.stat().st_mode & 0o777, 0o444)
+
+    def test_catalog_only_lists_enabled_primary_and_verified_fallback(self):
+        Path(".env").write_text(self.text + "\nMODEL_FALLBACK_PROVIDER=zhipu\nMODEL_FALLBACK_VERIFIED=true"
+                               "\nZHIPU_API_BASE=https://example.test/v1\nZHIPU_MODEL=test-fallback")
+        self.run_configure()
+        models = json.loads(Path(".runtime/chat-models.json").read_text())
+        self.assertEqual([item["id"] for item in models], ["learning-agent", "learning-fallback"])
+        self.assertEqual(models[1], {"id": "learning-fallback", "name": "test-fallback", "provider": "zhipu"})
 
 
 if __name__ == "__main__":

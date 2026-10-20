@@ -117,6 +117,7 @@ def configure(env_file, check_only=False, infrastructure_only=False):
         path.write_text(value)
         path.chmod(0o444)
     models = []
+    chat_models = []
     for alias, provider in (("learning-agent", primary), ("learning-fallback", fallback)):
         if provider:
             prefix = provider.upper()
@@ -125,10 +126,16 @@ def configure(env_file, check_only=False, infrastructure_only=False):
             if costs:
                 model["model_info"] = {"mode": "chat", **costs}
             models.append(model)
+            chat_models.append({"id": alias, "name": cfg[prefix + "_MODEL"], "provider": provider})
     config = {"model_list": models, "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY", "database_url": "os.environ/DATABASE_URL", "store_model_in_db": False}, "litellm_settings": {"drop_params": False, "num_retries": 0, "set_verbose": False, "json_logs": True, "turn_off_message_logging": True}, "router_settings": {"num_retries": 0, "timeout": int(cfg.get("MODEL_REQUEST_TIMEOUT", "90"))}}
     if fallback:
         config["router_settings"]["fallbacks"] = [{"learning-agent": ["learning-fallback"]}]
     Path(".runtime/litellm.json").write_text(json.dumps(config, ensure_ascii=False, indent=2))
+    catalog = Path(".runtime/chat-models.json")
+    if catalog.exists():
+        catalog.chmod(0o600)
+    catalog.write_text(json.dumps(chat_models, ensure_ascii=False, indent=2))
+    catalog.chmod(0o444)
     override = {"services": {}}
     if tls == "nginx":
         override["services"]["web"] = {"ports": [f"{bind}:{cfg.get('APP_TLS_PORT', '8443')}:443"], "volumes": ["./deploy/nginx/tls.conf:/etc/nginx/conf.d/default.conf:ro", "./.secrets/tls:/run/tls:ro"]}

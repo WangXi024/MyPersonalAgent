@@ -21,11 +21,13 @@ x-app: &app
     LITELLM_BASE_URL: http://litellm:4000/v1
     MODEL_ALIAS: learning-agent
     LITELLM_MODEL_ALIAS: learning-agent
+    CHAT_MODEL_CATALOG_PATH: /run/chat-models.json
     HINDSIGHT_BASE_URL: http://hindsight:8888
   secrets: [app_db_password]
   volumes:
     - attachments:/data/attachments
     - service-keys:/run/service-keys:ro
+    - ./.runtime/chat-models.json:/run/chat-models.json:ro
   stop_grace_period: 90s
 
 services:

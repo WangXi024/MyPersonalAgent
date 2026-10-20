@@ -1,0 +1,23 @@
+.markdown-message{min-width:0;line-height:1.85;overflow-wrap:anywhere}
+.markdown-message>:first-child{margin-top:0}
+.markdown-message>:last-child{margin-bottom:0}
+.markdown-message p,.markdown-message ul,.markdown-message ol,.markdown-message blockquote,.markdown-message pre,.markdown-message .markdown-table{margin:0 0 14px}
+.markdown-message h1,.markdown-message h2,.markdown-message h3,.markdown-message h4,.markdown-message h5,.markdown-message h6{font-size:1.1em;font-weight:600;line-height:1.6;margin:22px 0 10px}
+.markdown-message ul,.markdown-message ol{padding-left:24px}
+.markdown-message li>p{margin-bottom:6px}
+.markdown-message li>ul,.markdown-message li>ol{margin-bottom:6px}
+.markdown-message a{color:#3c638b;text-decoration:underline;text-underline-offset:3px}
+.markdown-message blockquote{border-left:3px solid var(--line);padding-left:14px;color:var(--muted)}
+.markdown-message code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.88em;background:#f1f1f1;border-radius:4px;padding:2px 5px}
+.markdown-message pre{max-width:100%;overflow-x:auto;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:#f7f7f7;line-height:1.65;white-space:pre;overflow-wrap:normal}
+.markdown-message pre code{padding:0;background:none;border-radius:0}
+.markdown-message .markdown-table{max-width:100%;overflow-x:auto}
+.markdown-message table{border-collapse:collapse;min-width:100%;font-size:.93em}
+.markdown-message th,.markdown-message td{border:1px solid var(--line);padding:7px 11px;text-align:left}
+.markdown-message th{background:#f7f7f7;font-weight:600}
+.markdown-message hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+.chat-operation>time{display:block;font-size:11px;color:var(--muted);margin:0 0 7px}
+.composer-model-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 10px;min-width:0}
+.composer-model-row .model-picker{min-width:0;max-width:100%}
+.composer-model-row select{width:auto;max-width:100%;margin:0;padding:5px 27px 5px 9px;border:1px solid var(--line);border-radius:7px;background-color:transparent;font-size:12px;color:var(--ink)}
+.composer-model-row small{font-size:11px;color:var(--muted)}

@@ -1,4 +1,4 @@
-import type { Accepted, Bootstrap, Conversation, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, Operation, Settings, User } from './types'
+import type { Accepted, Bootstrap, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, Operation, Settings, User } from './types'
 
 let csrfToken = ''
 export class ApiError extends Error {
@@ -39,6 +39,8 @@ export const api = {
   command: (path: string, body: unknown = {}, key?: string) => request<Accepted>(path, { method: 'POST', body, key }),
   upload: (file: File, key: string) => { const body = new FormData(); body.append('file', file); return request<{ id: string; filename: string }>('/attachments', { method: 'POST', body, key }) },
   messages: (id: string, after = 0) => request<MessagesResponse>(`/conversations/${encodeURIComponent(id)}/messages?after=${after}&limit=100`),
+  conversationModels: (id: string) => request<ConversationModels>(`/conversations/${encodeURIComponent(id)}/model`),
+  selectConversationModel: (id: string, modelId: string, expectedVersion: number, key: string) => request<ConversationModels>(`/conversations/${encodeURIComponent(id)}/model`, { method: 'PATCH', body: { model_id: modelId, expected_version: expectedVersion }, key }),
   goalDrafts: (id: string) => request<{ items: GoalDraft[] }>(`/conversations/${encodeURIComponent(id)}/goal-drafts`),
   acceptGoalDraft: (id: string, body: GoalInput, key: string) => request<Accepted>(`/goal-drafts/${encodeURIComponent(id)}/accept`, { method: 'POST', body, key }),
   operation: (id: string) => request<Operation>(`/operations/${encodeURIComponent(id)}`),

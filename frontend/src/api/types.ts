@@ -15,6 +15,7 @@ export interface DailyBudget { local_date: string; authorized_minutes: number; c
 export type Settings = User
 export interface Memory { id: string; content: string; source_type: string; status: string; suppressed: boolean; deleted: boolean; created_at: string }
 export interface Conversation { id: string; goal_id: string | null; last_seq: number; read_seq: number; unread_count: number }
+export interface ConversationModels { items: { id: string; name: string; provider: 'bailian' | 'zhipu' | 'ark' | 'gateway' }[]; model_id: string; version: number }
 export interface Bootstrap { task_counts?: { awaiting_review: number }; user: User; cursor: number; goals: Goal[]; tasks: Task[]; operations: Operation[]; events: Activity[]; budget: DailyBudget; conversations: Conversation[] }
 export interface GoalDetail { goal: Goal; plans: Plan[]; milestones: Milestone[]; tasks: Task[]; evaluations: Evaluation[]; submissions: Submission[]; skills: { id: string; name: string; status: string; evaluation_id: string | null; review_at: string | null }[]; operations: Operation[]; conversation: Conversation }
 export interface Accepted { operation_id: string; status: string; resource_id?: string }

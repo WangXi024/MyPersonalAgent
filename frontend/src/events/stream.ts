@@ -1,6 +1,6 @@
 import type { Activity } from '../api/types'
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting'
-const eventTypes = ['business', 'business_event', 'operation.accepted', 'operation.started', 'operation.stage_changed', 'operation.succeeded', 'operation.failed', 'operation.cancelled', 'operation.superseded', 'plan.proposed', 'plan.activated', 'plan.rejected', 'task.recommended', 'task.updated', 'submission.saved', 'evaluation.completed', 'message.created', 'conversation.read', 'goal.created', 'goal.paused', 'goal.resumed', 'goal.cancelled', 'goal.completed', 'settings.updated', 'memory.sync_changed', 'memory.updated', 'memory.deleted']
+const eventTypes = ['business', 'business_event', 'operation.accepted', 'operation.started', 'operation.stage_changed', 'operation.succeeded', 'operation.failed', 'operation.cancelled', 'operation.superseded', 'plan.proposed', 'plan.activated', 'plan.rejected', 'task.recommended', 'task.updated', 'submission.saved', 'evaluation.completed', 'message.created', 'conversation.read', 'conversation.model_changed', 'goal.created', 'goal.paused', 'goal.resumed', 'goal.cancelled', 'goal.completed', 'settings.updated', 'memory.sync_changed', 'memory.updated', 'memory.deleted']
 
 /** One persisted event stream for the whole authenticated application. */
 export function openEventStream(cursor: number, onEvent: (event: Activity) => void, onState: (state: ConnectionState) => void, onReset: () => void, onReconnect: () => void) {

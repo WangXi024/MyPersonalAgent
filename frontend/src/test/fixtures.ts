@@ -1,4 +1,5 @@
-import type { Bootstrap, GoalDetail } from '../api/types'
+import type { Bootstrap, ConversationModels, GoalDetail } from '../api/types'
+export const conversationModels: ConversationModels = { items: [{ id: 'learning-agent', name: '已配置模型', provider: 'bailian' }], model_id: 'learning-agent', version: 1 }
 export const user = { id: 'user-1', username: '学习者', timezone: 'Asia/Shanghai', daily_minutes: 30, availability_version: 1, memory_control_revision: 1, proactive_enabled: true, quiet_start: 22, quiet_end: 8, learning_hour: 19 }
 export const goal = { id: 'goal-1', title: '学习 Python', background: '零基础', outcome: '完成一个小工具', criteria: ['独立完成'], deadline: null, status: 'active' as const, control_revision: 1, active_plan_id: 'plan-1', conversation_id: 'conversation-1', created_at: '2026-10-20T01:00:00Z', unread_count: 0 }
 export const task = { id: 'task-1', plan_id: 'plan-1', goal_id: goal.id, milestone_id: 'milestone-1', title: '练习返回值', instructions: '编写一个返回两个数之和的函数。', criteria: ['正确返回结果'], skills: ['函数'], estimated_minutes: 15, reserved_minutes: 15, scheduled_date: '2026-10-20', status: 'in_progress' as const, state_version: 1, requirements_version: 1, active_submission_id: null, review_of_task_id: null }

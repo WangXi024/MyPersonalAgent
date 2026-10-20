@@ -67,7 +67,7 @@ async def ready(request: Request):
     try:
         async with SessionFactory() as db:
             version = await db.scalar(text("SELECT version_num FROM alembic_version"))
-            if version != "0002_general_chat":
+            if version != "0003_conversation_model":
                 return error(request, "migration_required", "数据库迁移未完成", 503)
         return {"status": "ready", "database": "ready", "migration": version}
     except SQLAlchemyError:

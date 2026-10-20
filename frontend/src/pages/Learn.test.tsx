@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../api/client'
-import { bootstrap, detail, task } from '../test/fixtures'
+import { bootstrap, conversationModels, detail, task } from '../test/fixtures'
 import { Learn } from './Learn'
 const refresh = vi.fn().mockResolvedValue(undefined)
 vi.mock('../state', () => ({ useApp: () => ({ data: bootstrap, revision: 1, refresh }) }))
@@ -12,6 +12,7 @@ vi.mock('../hooks', async importOriginal => { const original = await importOrigi
 beforeEach(() => {
   detail.tasks = [task]
   vi.spyOn(api, 'messages').mockResolvedValue({ items: [], last_seq: 0, read_seq: 0, has_more: false })
+  vi.spyOn(api, 'conversationModels').mockResolvedValue(conversationModels)
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 function mount() { return render(<MemoryRouter initialEntries={['/goals/goal-1/learn?task=task-1']}><Routes><Route path="/goals/:goalId/learn" element={<Learn />} /></Routes></MemoryRouter>) }

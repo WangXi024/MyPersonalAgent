@@ -3,6 +3,25 @@ import httpx
 from app.main import app
 
 
+async def test_readiness_requires_the_current_migration(database):
+    from sqlalchemy import text
+
+    factory, _, _ = database
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost:8080"
+    ) as client:
+        assert (await client.get("/health/ready")).status_code == 503
+        async with factory() as db, db.begin():
+            await db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+            await db.execute(text("INSERT INTO alembic_version VALUES ('0002_general_chat')"))
+        assert (await client.get("/health/ready")).status_code == 503
+        async with factory() as db, db.begin():
+            await db.execute(text("UPDATE alembic_version SET version_num = '0003_conversation_model'"))
+        response = await client.get("/health/ready")
+        assert response.status_code == 200
+        assert response.json()["migration"] == "0003_conversation_model"
+
+
 async def test_auth_csrf_and_untrusted_origin(database):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://localhost:8080"

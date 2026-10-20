@@ -927,8 +927,11 @@ async def reserve_model_request(operation_id: str, limit: int = 6) -> dict:
             "availability_version"
         ):
             raise DomainError("availability_changed", "时间预算已变化")
+        from app.integrations.model_catalog import resolve_model
+
+        model_alias = resolve_model(op.versions.get("model_alias"))
         op.model_requests += 1
-        return {"requests": op.model_requests, "limit": min(limit, 6)}
+        return {"requests": op.model_requests, "limit": min(limit, 6), "model_alias": model_alias}
 
 
 async def record_model_tokens(operation_id: str, input_tokens: int, output_tokens: int) -> dict:

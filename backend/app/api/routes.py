@@ -111,6 +111,10 @@ class ReadInput(BaseModel):
     seq: int = Field(ge=0)
 
 
+class ConversationModelInput(VersionInput):
+    model_id: str = Field(min_length=1, max_length=100)
+
+
 class SettingsInput(VersionInput):
     timezone: str | None = None
     daily_minutes: int | None = Field(default=None, ge=5, le=720)
@@ -413,6 +417,45 @@ async def messages(
             "read_seq": conversation.read_seq,
             "has_more": bool(items and items[-1].seq < conversation.last_seq),
         }
+
+
+def conversation_model_json(conversation):
+    from app.integrations.model_catalog import configured_models
+    from app.integrations.settings import runtime_settings
+
+    return {
+        "items": configured_models(),
+        "model_id": conversation.model_alias or runtime_settings().litellm_model_alias,
+        "version": conversation.model_version,
+    }
+
+
+@router.get("/conversations/{conversation_id}/model")
+async def conversation_model(conversation_id: str, user=Depends(current_user)):
+    async with SessionFactory() as db:
+        conversation = await owned(db, Conversation, conversation_id, user.id)
+        return conversation_model_json(conversation)
+
+
+@router.patch("/conversations/{conversation_id}/model")
+async def select_conversation_model(
+    conversation_id: str, payload: ConversationModelInput, user=Depends(current_user)
+):
+    from app.integrations.model_catalog import resolve_model
+
+    async with SessionFactory() as db, db.begin():
+        current, stream = await lock_user(db, user.id)
+        conversation = await owned(db, Conversation, conversation_id, user.id)
+        alias = resolve_model(payload.model_id)
+        # A repeated selection is harmless, including a retry after a lost response.
+        if conversation.model_alias != alias:
+            version(conversation.model_version, payload.expected_version)
+            conversation.model_alias = alias
+            conversation.model_version += 1
+            await emit(db, stream, "conversation.model_changed", conversation.id,
+                       "对话模型已更新，将用于新的回复", conversation.goal_id,
+                       entity_version=conversation.model_version)
+        return conversation_model_json(conversation)
 
 
 @router.get("/conversations/{conversation_id}/goal-drafts")

@@ -136,6 +136,13 @@ async def new_operation(db, user, stream, key, kind, payload, goal=None, proacti
         "control_revision": goal.control_revision if goal else None,
         "active_plan_id": goal.active_plan_id if goal else None,
     }
+    if kind in {"tutor", "plan", "assessment", "recommendation"}:
+        from app.integrations.model_catalog import resolve_model
+
+        conversation = None
+        if kind == "tutor" and payload.get("conversation_id"):
+            conversation = await owned(db, Conversation, payload["conversation_id"], user.id)
+        versions["model_alias"] = resolve_model(conversation.model_alias if conversation else None)
     op = Operation(
         user_id=user.id,
         goal_id=goal.id if goal else None,

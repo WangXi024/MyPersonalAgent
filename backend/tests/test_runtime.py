@@ -161,6 +161,7 @@ async def test_provider_error_body_cannot_enter_workflow_failure(monkeypatch, st
 
     async def reserve(operation_id, limit):
         reservations.append((operation_id, limit))
+        return {"model_alias": "learning-agent"}
 
     async def fail(*args, **kwargs):
         raise ModelHTTPError(status, "test-model", body="private-provider-payload-test-only")

@@ -1,4 +1,5 @@
 from pydantic_ai.models.wrapper import WrapperModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.exceptions import ModelHTTPError
 from temporalio.exceptions import ApplicationError
 
@@ -15,13 +16,16 @@ class BudgetedModel(WrapperModel):
         if not operation_id:
             raise ApplicationError("Missing operation budget", type="ConfigurationError", non_retryable=True)
         try:
-            await reserve_model_request(operation_id, limit=6)
+            reservation = await reserve_model_request(operation_id, limit=6)
         except DomainError:
             raise ApplicationError("Operation cannot issue another request", type="OperationBudgetClosed",
                                    non_retryable=True) from None
         failure = None
         try:
-            response = await self.wrapped.request(messages, settings, model_request_parameters)
+            model = self.wrapped
+            if reservation["model_alias"] != model.model_name:
+                model = OpenAIChatModel(reservation["model_alias"], provider=model.provider)
+            response = await model.request(messages, settings, model_request_parameters)
         except ModelHTTPError as error:
             failure = ApplicationError(f"Provider request failed (HTTP {error.status_code})",
                 type="ProviderRequestFailed", non_retryable=error.status_code in {400, 401, 403, 404, 422})
