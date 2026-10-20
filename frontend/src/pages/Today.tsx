@@ -1,6 +1,5 @@
 import { ArrowRight, ArrowUpRight, CalendarDays, Check, Clock3, Compass, MessageCircle, Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { AssistantChat } from '../components/AssistantChat'
 import { useApp } from '../state'
 import { EmptyState, OperationCard, PageHeading, SectionHeading, Status, TaskRow, timeLabel } from '../components/ui'
 
@@ -17,7 +16,7 @@ export function Today() {
   const running = operations.filter(operation => ['accepted', 'running', 'waiting_user', 'failed'].includes(operation.status)).slice(0, 3)
   const date = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long', timeZone: data.user.timezone }).format(new Date())
   return <><PageHeading eyebrow={date} title={`你好，${data.user.username}`} description="查看学习安排、消息和处理进度。" action={<Link className="button secondary" to="/goals/new"><Plus size={17} />新建学习目标</Link>} />
-    <div className="dashboard-grid"><div className="dashboard-main"><AssistantChat compact />
+    <div className="dashboard-grid"><div className="dashboard-main">
       <section className="next-step"><div className="row spread"><span className="eyebrow">下一项任务</span>{next && <span className="soft-tag"><Clock3 size={13} />约 {next.estimated_minutes} 分钟</span>}</div>
         {next ? <><div className="next-goal">{nextGoal?.title}</div><h2>{next.title}</h2><p className="next-description">{next.instructions}</p><div className="next-reason"><span>{next.status === 'needs_revision' ? '查看上次反馈，修改后再次提交。' : next.status === 'in_progress' ? '继续完成进行中的任务。' : '来自已确认的学习计划。'}</span></div><div className="row wrap next-actions"><Link className="button primary" to={`/goals/${next.goal_id}/learn?task=${next.id}`}>{next.status === 'in_progress' ? '继续学习' : '开始这一步'}<ArrowRight size={17} /></Link><Link className="text-button" to={`/goals/${next.goal_id}/learn?task=${next.id}&adjust=1`}>调整今天的任务</Link></div></> : <><div className="next-goal">今日安排</div><h2>{goals.length ? '今天暂无待开始任务' : '创建你的第一个学习目标'}</h2><p className="next-description">{goals.length ? '查看目标计划，或在对话中讨论下一步。' : '说明学习目标和当前基础，确认计划后开始。'}</p><Link className="button primary" to={goals.length ? '/goals' : '/goals/new'}>{goals.length ? '查看学习目标' : '创建第一个目标'}<ArrowRight size={17} /></Link></>}
       </section>
