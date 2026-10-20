@@ -18,8 +18,9 @@ class BudgetedModel(WrapperModel):
             raise ApplicationError("Missing operation budget", type="ConfigurationError", non_retryable=True)
         try:
             reservation = await reserve_model_request(operation_id, limit=6)
-        except DomainError:
-            raise ApplicationError("Operation cannot issue another request", type="OperationBudgetClosed",
+        except DomainError as error:
+            raise ApplicationError("Operation cannot issue another request",
+                                   type="OperationDeadline" if error.code == "operation_deadline" else "OperationBudgetClosed",
                                    non_retryable=True) from None
         failure = None
         try:

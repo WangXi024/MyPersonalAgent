@@ -433,3 +433,118 @@ async def test_chat_clarifies_then_drafts_and_only_confirmation_starts_planning(
             workflow_ids = [f"assistant-{user.id}"] + ([f"goal-{user.id}-{goal_id}"] if goal_id else [])
             for workflow_id in workflow_ids:
                 await client.get_workflow_handle(workflow_id).cancel()
+
+
+async def test_chat_choice_reaches_durable_planner_and_stays_pending_until_accepted(database, monkeypatch):
+    import asyncio
+    import json
+    from zoneinfo import ZoneInfo
+
+    from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+    from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.usage import RequestUsage
+    from temporalio.client import Client
+    from temporalio.worker import Replayer, Worker
+
+    from app.api.routes import assistant_conversation
+    from app.db.models import Goal, Operation, Outbox, Plan, Task, now
+    from app.dispatcher import deliver
+    from app.domain import commands, execution
+    from app.integrations.settings import runtime_settings
+    from app.workflows.activities import ACTIVITIES
+    from app.workflows.learning import AssistantWorkflow, GoalWorkflow, OperationWorkflow
+
+    factory, user, _ = database
+    start = now().astimezone(ZoneInfo(user.timezone)).date()
+    deadline = (start + timedelta(days=6)).isoformat()
+    background = f"已会 Python，Docker 可用。{start} 开始七天，每天30分钟；第三天20分钟概念+10分钟可选Docker。"
+    goal = await commands.create_goal(user.id, str(uuid4()), {
+        "title": "七天学习 Temporal", "background": "基础和环境待确认", "outcome": "理解持久化执行",
+        "criteria": ["解释重放与 signal"], "deadline": (start + timedelta(days=5)).isoformat()})
+    await execution.mark_failed(goal["operation_id"], "model_timeout", "")
+    conversation = await assistant_conversation(user)
+    choice = "使用方案二，Docker 挂在第三天"
+    calls = []
+
+    async def respond(self, messages, model_settings, model_request_parameters, **kwargs):
+        tool = model_request_parameters.output_tools[0]
+        planning = "milestones" in tool.parameters_json_schema.get("properties", {})
+        calls.append("plan" if planning else "tutor")
+        if planning:
+            prompt = next(part.content for msg in reversed(messages) for part in msg.parts
+                          if isinstance(part, UserPromptPart) and isinstance(part.content, str)
+                          and part.content.startswith("请根据"))
+            context = json.loads(prompt.split("\n", 1)[1])
+            assert context["goal"]["deadline"] == deadline and context["goal"]["background"] == background
+            assert context["planning_request"]["user_message"] == choice
+            tasks = [{"title": f"第{day + 1}天", "instructions": "理解概念并主动回忆",
+                      "estimated_minutes": 20 if day == 2 else 30,
+                      "scheduled_date": (start + timedelta(days=day)).isoformat(),
+                      "milestone_index": 0, "criteria": ["解释所学概念"]} for day in range(7)]
+            tasks.append({**tasks[2], "title": "可选 Docker 练习", "estimated_minutes": 10})
+            output = {"kind": "plan", "summary": "七天理解型计划", "message": "请检查并确认。",
+                      "milestones": [{"title": "理解持久化执行", "criteria": ["解释重放与 signal"]}],
+                      "tasks": tasks}
+        else:
+            output = {"kind": "tutor", "summary": "执行已确认选择", "message": "不应发布模型自行声称的执行结果",
+                      "actions": [{"kind": "update_goal", "goal_id": goal["resource_id"], "expected_revision": 1,
+                                   "request_quote": choice, "changes": {"background": background, "deadline": deadline}}]}
+        return ModelResponse(parts=[ToolCallPart(tool.name, output)],
+                             usage=RequestUsage(input_tokens=30, output_tokens=50), model_name="test-provider")
+
+    monkeypatch.setattr(OpenAIChatModel, "request", respond)
+    monkeypatch.setattr(runtime_settings(), "litellm_api_key", SecretStr("test-only-not-a-provider-key"))
+    queue = f"test-chat-action-{uuid4()}"
+    monkeypatch.setattr(runtime_settings(), "temporal_task_queue", queue)
+    client = await Client.connect(os.environ["TEMPORAL_TEST_ADDRESS"],
+        namespace=os.getenv("TEMPORAL_TEST_NAMESPACE", "learning-agent"), plugins=[PydanticAIPlugin()])
+
+    parents = set()
+    async def finish(operation_id):
+        async with factory() as db:
+            item = await db.scalar(select(Outbox).where(Outbox.operation_id == operation_id, Outbox.kind == "temporal"))
+            command = {"id": item.id, "kind": item.kind, "payload": item.payload}
+        await deliver(client, command)
+        parents.add(f"goal-{user.id}-{command['payload']['goal_id']}" if command["payload"]["goal_id"]
+                    else f"assistant-{user.id}")
+        await deliver(client, command)  # Redelivery must not repeat the command or model call.
+        for _ in range(200):
+            async with factory() as db:
+                operation = await db.get(Operation, operation_id)
+                if operation.status in {"succeeded", "failed", "superseded"}:
+                    assert operation.status == "succeeded", operation.error_code
+                    return operation.result
+            await asyncio.sleep(0.1)
+        raise AssertionError("Operation did not finish")
+
+    async with Worker(client, task_queue=queue, workflows=[AssistantWorkflow, GoalWorkflow, OperationWorkflow],
+                      activities=ACTIVITIES):
+        try:
+            sent = await commands.send_message(user.id, conversation["id"], {"content": choice}, str(uuid4()))
+            result = await finish(sent["operation_id"])
+            follow_id = result["actions"][0]["operation_id"]
+            assert result["actions"][0]["status"] == "applied"
+            await finish(follow_id)
+            async with factory() as db:
+                saved = await db.get(Goal, goal["resource_id"])
+                assert saved.control_revision == 2 and saved.status == "draft"
+                plan = await db.scalar(select(Plan).where(Plan.goal_id == saved.id))
+                assert plan.status == "proposed"
+                assert await db.scalar(select(Task).where(Task.goal_id == saved.id)) is None
+            for operation_id in (sent["operation_id"], follow_id):
+                history = await client.get_workflow_handle(f"operation-{operation_id}").fetch_history()
+                await Replayer(workflows=[OperationWorkflow], plugins=[PydanticAIPlugin()]).replay_workflow(history)
+            assert calls == ["tutor", "plan"]
+            await commands.accept_plan(user.id, plan.id, plan.version, True, str(uuid4()))
+            async with factory() as db:
+                tasks = list(await db.scalars(select(Task).where(Task.goal_id == saved.id)))
+                by_date = {}
+                for task in tasks:
+                    by_date[task.scheduled_date] = by_date.get(task.scheduled_date, 0) + task.estimated_minutes
+                assert len(tasks) == 8 and len(by_date) == 7
+                assert min(by_date) == start and max(by_date).isoformat() == deadline
+                assert set(by_date.values()) == {30}
+        finally:
+            for workflow_id in parents:
+                await client.get_workflow_handle(workflow_id).cancel()

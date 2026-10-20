@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.agents.schemas import GoalDraft
 from app.config import get_settings
@@ -124,6 +124,28 @@ async def check_plan_cap(db, user, goal, proposal: dict):
         )
 
 
+async def goal_overview(db, goal):
+    plans = list(await db.scalars(select(Plan).where(Plan.goal_id == goal.id).order_by(Plan.version.desc())))
+    latest = await db.scalar(select(Operation).where(
+        Operation.goal_id == goal.id, Operation.kind == "plan"
+    ).order_by(Operation.created_at.desc()).limit(1))
+    counts = (await db.execute(select(Task.status, func.count()).where(
+        Task.goal_id == goal.id
+    ).group_by(Task.status))).all()
+    return {
+        **serialize(goal),
+        "plan_count": len(plans),
+        "plans": [{"id": p.id, "version": p.version, "status": p.status, "summary": p.summary[:500]}
+                  for p in plans[:3]],
+        "task_counts": dict(counts),
+        "latest_plan_operation": {
+            "id": latest.id, "status": latest.status, "error_code": latest.error_code,
+            "error_message": latest.error_message,
+        } if latest else None,
+        "url": f"/goals/{goal.id}",
+    }
+
+
 async def load_context(operation_id: str) -> dict:
     async with SessionFactory() as db:
         op = await db.get(Operation, operation_id)
@@ -155,15 +177,18 @@ async def load_context(operation_id: str) -> dict:
                 (
                     await db.scalars(
                         select(Message)
+                        .outerjoin(Operation, Message.operation_id == Operation.id)
                         .where(
                             Message.conversation_id == conversation.id,
                             or_(
-                                Message.role != "user",
                                 Message.seq <= op.payload.get("message_seq", conversation.last_seq),
+                                and_(Message.role == "assistant", Operation.created_at < op.created_at,
+                                     Operation.payload["message_seq"].as_integer()
+                                     <= op.payload.get("message_seq", conversation.last_seq)),
                             ),
                         )
                         .order_by(Message.seq.desc())
-                        .limit(30)
+                        .limit(20)
                     )
                 ).all()
             )
@@ -265,9 +290,10 @@ async def load_context(operation_id: str) -> dict:
                     attachments.append(await attachment_context(attachment))
         message_data, message_chars = [], 0
         for item in messages:
-            if message_chars + len(item.content) > 60000:
+            if message_chars + len(item.content) > 20000:
                 break
-            message_data.append(serialize(item))
+            message_data.append({"seq": item.seq, "role": item.role, "content": item.content,
+                                 "created_at": item.created_at.isoformat()})
             message_chars += len(item.content)
         task_data, task_chars = [], 0
         for item in tasks:
@@ -308,15 +334,48 @@ async def load_context(operation_id: str) -> dict:
                 }
                 for item in await goal_draft_items(db, conversation, limit=10)
             ]
+        ordered_messages = list(reversed(message_data))
+        history = []
+        if op.kind == "tutor":
+            from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+            # Public turns, not previous full database snapshots or internal reasoning/tool traces.
+            turns = [m for m in ordered_messages
+                     if m["role"] == "assistant" or m["seq"] < op.payload.get("message_seq", 0)]
+            history = ModelMessagesTypeAdapter.dump_python([
+                ModelRequest(parts=[UserPromptPart(m["content"])]) if m["role"] == "user"
+                else ModelResponse(parts=[TextPart(m["content"])])
+                for m in turns
+            ], mode="json")
+        planning_request = None
+        if op.kind == "plan" and op.payload.get("source_operation_id"):
+            source = await db.get(Operation, op.payload["source_operation_id"])
+            if source and source.user_id == user.id and source.kind == "tutor":
+                recent = list(await db.scalars(select(Message).where(
+                    Message.conversation_id == source.payload.get("conversation_id"),
+                    Message.seq <= source.payload.get("message_seq", 0),
+                ).order_by(Message.seq.desc()).limit(6)))
+                planning_request = {
+                    "user_message": source.payload.get("content", ""),
+                    "conversation": [{"role": m.role, "content": m.content[:3000]} for m in reversed(recent)],
+                }
+        model_payload = dict(op.payload)
+        if goal and op.kind == "plan":
+            # A UI retry can retain its original request payload; the saved goal is authoritative.
+            current_goal = serialize(goal)
+            for field in ("title", "background", "outcome", "criteria", "deadline"):
+                if field in model_payload:
+                    model_payload[field] = current_goal[field]
         return {
-            "operation": {**public_operation(op), "payload": op.payload, "versions": op.versions},
+            "operation": {**public_operation(op), "payload": model_payload, "versions": op.versions},
             "user": public_user(user),
             "goal": serialize(goal) if goal else None,
             "goal_drafts": draft_states,
             "goals": [
-                {"id": item.id, "title": item.title, "outcome": item.outcome[:500], "status": item.status}
+                await goal_overview(db, item)
                 for item in await db.scalars(
-                    select(Goal).where(Goal.user_id == user.id).order_by(Goal.created_at.desc()).limit(30)
+                    select(Goal).where(Goal.user_id == user.id, Goal.status.notin_(["cancelled", "completed"]))
+                    .order_by(Goal.created_at.desc()).limit(10)
                 )
             ]
             if goal is None
@@ -338,28 +397,15 @@ async def load_context(operation_id: str) -> dict:
                 }
                 for item in evidence
             ],
-            "messages": list(reversed(message_data)),
+            "messages": ordered_messages,
+            "planning_request": planning_request,
             "memories": [
                 {"id": m.id, "version": m.version, "suppressed": m.suppressed, "deleted": m.deleted}
                 for m in memories
             ],
             "memory_bank_id": f"learning-{user.id}",
             "memory_recall_enabled": user.memory_recall_enabled,
-            "agent_history": op.agent_history
-            or (
-                await db.scalar(
-                    select(Operation.agent_history)
-                    .where(
-                        Operation.goal_id == op.goal_id,
-                        Operation.user_id == user.id,
-                        Operation.kind == "tutor",
-                        Operation.status == "succeeded",
-                    )
-                    .order_by(Operation.created_at.desc())
-                    .limit(1)
-                )
-            )
-            or [],
+            "agent_history": history,
             "today": now().astimezone(ZoneInfo(user.timezone)).date().isoformat(),
         }
 
@@ -485,6 +531,17 @@ async def commit_result(operation_id: str, result: dict) -> dict:
             except ValidationError:
                 raise DomainError("invalid_goal_draft", "目标草稿字段不完整或无效", 422) from None
         content = str(result.get("message") or result.get("summary") or "处理完成。")[:32000]
+        action_receipts = []
+        if result.get("actions"):
+            if op.kind != "tutor" or draft is not None or result.get("follow_up") is not None:
+                raise DomainError("invalid_chat_actions", "这些操作仅用于明确的对话要求", 422)
+            from app.domain.chat_actions import apply_chat_actions
+
+            action_receipts = await apply_chat_actions(db, user, stream, op, result)
+            content = "\n\n".join(
+                f"{item['goal_title'] + '：' if item['goal_title'] else ''}{item['message']}"
+                for item in action_receipts
+            )
         resource_id = None
         task_id = None
         if op.kind == "plan":
@@ -653,6 +710,8 @@ async def commit_result(operation_id: str, result: dict) -> dict:
         )
         op.status, op.stage, op.updated_at = "succeeded", "saved", now()
         op.result = {"resource_id": resource_id, "message_id": msg.id}
+        if action_receipts:
+            op.result = {**op.result, "actions": action_receipts}
         if draft is not None:
             previous = await db.scalars(
                 select(Operation).where(
@@ -915,7 +974,7 @@ async def reserve_model_request(operation_id: str, limit: int = 6) -> dict:
             created = created.replace(tzinfo=timezone.utc)
         if op.status in TERMINAL:
             raise DomainError("operation_terminal", "操作已结束")
-        if now() - created > timedelta(minutes=15):
+        if now() - created > timedelta(minutes=30):
             raise DomainError("operation_deadline", "操作超过最大执行时间")
         if op.model_requests >= min(limit, 6):
             raise DomainError("model_budget_exceeded", "该操作的模型调用预算已用完")

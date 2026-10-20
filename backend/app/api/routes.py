@@ -411,8 +411,14 @@ async def messages(
                 )
             ).all()
         )
+        operations = {op.id: op for op in await db.scalars(select(Operation).where(
+            Operation.user_id == user.id, Operation.id.in_([item.operation_id for item in items if item.operation_id])
+        ))}
         return {
-            "items": [serialize(item) for item in items],
+            "items": [{**serialize(item), "actions": (
+                operations[item.operation_id].result.get("actions", [])
+                if item.role == "assistant" and item.operation_id in operations else []
+            )} for item in items],
             "last_seq": conversation.last_seq,
             "read_seq": conversation.read_seq,
             "has_more": bool(items and items[-1].seq < conversation.last_seq),

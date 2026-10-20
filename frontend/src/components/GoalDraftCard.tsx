@@ -17,10 +17,13 @@ export function GoalDraftCard({ proposal }: { proposal: GoalDraft }) {
   const [accepted, setAccepted] = useState<{ response: Accepted; draft: GoalInput } | null>(null)
   const [loadedOperation, setLoadedOperation] = useState<Operation | null>(null)
   const [operationError, setOperationError] = useState<Error | null>(null)
+  const [retryPlan, setRetryPlan] = useState<{ id: string; previousLatestId?: string } | null>(null)
   const isAccepted = proposal.status === 'accepted' || accepted !== null
   const expired = proposal.status === 'superseded' && !isAccepted
   const goalId = proposal.goal_id ?? accepted?.response.resource_id
-  const planId = proposal.plan_operation_id ?? accepted?.response.operation_id
+  const currentGoal = data?.goals.find(goal => goal.id === goalId)
+  const latestPlan = data?.operations.filter(operation => operation.goal_id === goalId && operation.kind === 'plan').sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+  const planId = retryPlan && latestPlan?.id === retryPlan.previousLatestId ? retryPlan.id : latestPlan?.id ?? retryPlan?.id ?? proposal.plan_operation_id ?? accepted?.response.operation_id
   const snapshotOperation = data?.operations.find(operation => operation.id === planId)
   const operation = snapshotOperation ?? (loadedOperation?.id === planId ? loadedOperation : null)
   useEffect(() => {
@@ -31,7 +34,12 @@ export function GoalDraftCard({ proposal }: { proposal: GoalDraft }) {
   }, [planId, snapshotOperation, revision])
   const change = (field: keyof typeof form, value: string) => setForm(previous => ({ ...previous, [field]: value }))
   const input: GoalInput = { title: form.title.trim(), background: form.background.trim(), outcome: form.outcome.trim(), criteria: form.criteria.split('\n').map(value => value.trim()).filter(Boolean), deadline: form.deadline || null }
-  const display = proposal.status === 'accepted' ? proposal.draft : accepted?.draft ?? input
+  const display = isAccepted && currentGoal ? currentGoal : proposal.status === 'accepted' ? proposal.draft : accepted?.draft ?? input
+  const retry = async () => {
+    if (!planId) return
+    const response = await run(`retry/${planId}`, key => api.command(`/operations/${planId}/retry`, {}, key))
+    if (response) setRetryPlan({ id: response.operation_id, previousLatestId: latestPlan?.id })
+  }
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (isAccepted || expired || pending) return
@@ -46,6 +54,7 @@ export function GoalDraftCard({ proposal }: { proposal: GoalDraft }) {
   }
   return <form className={`goal-draft-card ${expired ? 'goal-draft-expired' : ''}`} onSubmit={submit} aria-label={`目标草稿：${display.title}`}>
     <div className="row spread wrap"><span className="row goal-draft-label">{isAccepted ? <Check size={15} /> : <Sprout size={16} />}{isAccepted ? '目标已创建' : expired ? '旧目标草稿' : '待你确认的目标'}</span>{!isAccepted && !expired && <button type="button" className="text-button" disabled={pending} aria-expanded={editing} onClick={() => setEditing(value => !value)}><Pencil size={13} />{editing ? '收起修改' : '修改'}</button>}</div>
+    {isAccepted && <ErrorNotice error={error} />}
     {editing && !isAccepted && !expired ? <div className="goal-draft-fields">
       <label>学习目标<input required maxLength={200} disabled={pending} value={form.title} onChange={event => change('title', event.target.value)} /></label>
       <label>现在的基础<textarea required rows={2} maxLength={8000} disabled={pending} value={form.background} onChange={event => change('background', event.target.value)} /></label>
@@ -53,6 +62,6 @@ export function GoalDraftCard({ proposal }: { proposal: GoalDraft }) {
       <label>完成标准<small>每行一项，最多 20 项，每项不超过 500 字。</small><textarea required rows={3} maxLength={10019} disabled={pending} value={form.criteria} onChange={event => change('criteria', event.target.value)} /></label>
       <label>希望完成的日期<small>选填，可保留空白。</small><input type="date" disabled={pending} value={form.deadline} onChange={event => change('deadline', event.target.value)} /></label>
     </div> : <div className="goal-draft-summary"><h3>{display.title}</h3><dl><dt>已有基础</dt><dd className="preserve-text">{display.background}</dd><dt>预期成果</dt><dd className="preserve-text">{display.outcome}</dd><dt>完成标准</dt><dd><ul>{display.criteria.map((criterion, index) => <li key={index}>{criterion}</li>)}</ul></dd><dt>期望日期</dt><dd>{display.deadline ?? '暂不设定'}</dd></dl></div>}
-    {isAccepted ? <div className="goal-draft-created"><p role="status">目标已保存，计划仍需你确认后才开始推进。</p>{operation ? <OperationCard operation={operation} /> : <p className="muted">正在读取计划准备状态…</p>}<ErrorNotice error={snapshotOperation ? null : operationError} retry={() => void refresh()} />{goalId && <Link className="button secondary" to={`/goals/${goalId}`}>查看目标与计划<ArrowRight size={14} /></Link>}</div> : expired ? <p className="goal-draft-note">这份草稿已失效，请查看对话中的最新草稿。</p> : <><p className="goal-draft-budget">每天 {data?.user.daily_minutes ?? '—'} 分钟由所有目标共享，沿用当前设置。</p><p className="goal-draft-note">确认后创建并准备计划，计划仍需确认。</p><ErrorNotice error={validation ?? error} /><button className="button primary" disabled={pending}>{pending ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{pending ? '正在创建目标' : '确认创建目标'}</button></>}
+    {isAccepted ? <div className="goal-draft-created">{currentGoal?.status === 'cancelled' ? <p role="status">这个目标已取消，历史记录保留。</p> : <><p role="status">目标已保存，计划仍需你确认后才开始推进。</p>{operation ? <OperationCard operation={operation} /> : <p className="muted">正在读取计划准备状态…</p>}{operation?.status === 'failed' && <button type="button" className="text-button" disabled={pending} onClick={() => void retry()}>重试生成计划</button>}</>}<ErrorNotice error={snapshotOperation ? null : operationError} retry={() => void refresh()} />{goalId && <Link className="button secondary" to={`/goals/${goalId}`}>查看目标与计划<ArrowRight size={14} /></Link>}</div> : expired ? <p className="goal-draft-note">这份草稿已失效，请查看对话中的最新草稿。</p> : <><p className="goal-draft-budget">每天 {data?.user.daily_minutes ?? '—'} 分钟由所有目标共享，沿用当前设置。</p><p className="goal-draft-note">确认后创建并准备计划，计划仍需确认。</p><ErrorNotice error={validation ?? error} /><button className="button primary" disabled={pending}>{pending ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{pending ? '正在创建目标' : '确认创建目标'}</button></>}
   </form>
 }

@@ -85,6 +85,42 @@ describe('direct Agent conversation', () => {
     await user.click(screen.getByRole('button', { name: '重试此操作' }))
     expect(command).toHaveBeenCalledWith('/operations/global-failed/retry', {}, expect.any(String))
   })
+  it('shows executed goal changes and their real planning progress in the conversation', async () => {
+    data.conversations = [globalConversation]
+    data.operations = [{ id: 'follow-plan', goal_id: 'temporal-goal', kind: 'plan', status: 'running', stage: 'reasoning', created_at: '2026-10-21T01:00:00Z' }]
+    vi.mocked(api.messages).mockResolvedValue({
+      items: [{ id: 'receipt-message', seq: 1, role: 'assistant', type: 'assistant_reply',
+        content: '目标要求已更新，正在准备新计划。', created_at: '2026-10-21T01:00:00Z',
+        actions: [{ kind: 'update_goal', status: 'applied', goal_id: 'temporal-goal', goal_title: '七天学习 Temporal',
+          operation_id: 'follow-plan', message: '目标要求已更新',
+          changes: { deadline: '2026-10-27', background: '已会 Python，Docker 在第三天的30分钟内。' } }],
+      }], last_seq: 1, read_seq: 0, has_more: false,
+    })
+    const view = render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByLabelText('目标操作结果：七天学习 Temporal')).toBeInTheDocument()
+    expect(screen.getByText('期望完成：2026-10-27')).toBeInTheDocument()
+    expect(screen.getByText('正在生成与当前目标有关的建议。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看目标与计划' })).toHaveAttribute('href', '/goals/temporal-goal')
+    data.operations = [{ ...data.operations[0], status: 'failed', error_code: 'model_timeout', error_message: '模型响应超时' }]
+    revision += 1
+    view.rerender(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(screen.getAllByText('模型响应超时')).not.toHaveLength(0)
+    expect(screen.queryByText('正在生成与当前目标有关的建议。')).not.toBeInTheDocument()
+  })
+  it('does not show a successful action or a foreign goal link for a rejected command', async () => {
+    data.conversations = [globalConversation]
+    vi.mocked(api.messages).mockResolvedValue({
+      items: [{ id: 'blocked-message', seq: 1, role: 'assistant', type: 'assistant_reply',
+        content: '资源不存在', created_at: '2026-10-21T01:00:00Z',
+        actions: [{ kind: 'cancel_goal', status: 'blocked', goal_id: null, goal_title: '',
+          operation_id: null, message: '资源不存在' }],
+      }], last_seq: 1, read_seq: 0, has_more: false,
+    })
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByText('未执行', { exact: true })).toBeInTheDocument()
+    expect(screen.queryByText('要求已处理')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看目标历史' })).not.toBeInTheDocument()
+  })
   it('keeps an old failure next to its request before a later successful Markdown reply', async () => {
     data.conversations = [globalConversation]
     data.operations = [{ id: 'old-failed', goal_id: null, kind: 'tutor', status: 'failed', error_message: '旧请求失败', created_at: '2026-10-20T03:00:00Z', updated_at: '2026-10-20T03:00:08Z' }]

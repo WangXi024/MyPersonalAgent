@@ -89,4 +89,24 @@ describe('goal draft confirmation', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('每项不超过 500 字'))
     expect(api.acceptGoalDraft).not.toHaveBeenCalled()
   })
+
+  it('lets the accepted goal card retry failed planning directly', async () => {
+    vi.mocked(api.operation).mockResolvedValue({ ...planning, status: 'failed', stage: 'failed', error_message: '模型响应超时' })
+    const command = vi.spyOn(api, 'command').mockResolvedValue({ operation_id: 'new-plan', status: 'accepted' })
+    const user = userEvent.setup()
+    mount({ ...proposal, status: 'accepted', goal_id: 'created-goal', plan_operation_id: 'planning-op' })
+    await user.click(await screen.findByRole('button', { name: '重试生成计划' }))
+    expect(command).toHaveBeenCalledWith('/operations/planning-op/retry', {}, expect.any(String))
+    await waitFor(() => expect(api.operation).toHaveBeenCalledWith('new-plan'))
+    expect(api.acceptGoalDraft).not.toHaveBeenCalled()
+  })
+
+  it('shows the current goal facts after an accepted draft is changed', async () => {
+    const goal = bootstrap.goals[0]
+    const original = { ...proposal.draft, title: '旧标题', background: '旧基础' }
+    mount({ ...proposal, draft: original, status: 'accepted', goal_id: goal.id, plan_operation_id: 'planning-op' })
+    expect(screen.getByRole('heading', { name: goal.title })).toBeInTheDocument()
+    expect(screen.getByText(goal.background)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: original.title })).not.toBeInTheDocument()
+  })
 })

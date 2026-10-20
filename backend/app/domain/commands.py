@@ -158,6 +158,8 @@ async def accept_goal_draft(user_id, operation_id, key, payload):
             ):
                 raise DomainError("idempotency_conflict", "规划操作键已被占用")
             response = await create_goal_in_transaction(db, user, stream, plan_key, payload)
+            planning = await db.get(Operation, response["operation_id"])
+            planning.payload = {**planning.payload, "source_operation_id": source.id}
             source.result = {
                 **source.result,
                 "goal_draft": payload,
@@ -210,136 +212,141 @@ async def control_goal(user_id, goal_id, action, expected_version, key):
     async with SessionFactory() as db, db.begin():
         user, stream = await lock_user(db, user_id)
         goal = await owned(db, Goal, goal_id, user_id)
-        op, created = await new_operation(
-            db, user, stream, key, "control", {"action": action, "expected_version": expected_version}, goal
-        )
-        if not created:
-            return serialize(goal)
-        version(goal.control_revision, expected_version)
-        allowed = {
-            "pause": ({"active"}, "paused"),
-            "resume": ({"paused"}, "active"),
-            "cancel": ({"draft", "active", "paused"}, "cancelled"),
-            "complete": ({"active"}, "completed"),
-        }
-        source, target = allowed[action]
-        if goal.status not in source:
-            raise DomainError("invalid_transition", "当前目标状态不允许此操作")
-        if action == "complete":
-            milestones = list(
-                (
-                    await db.scalars(
-                        select(Milestone).where(
-                            Milestone.goal_id == goal.id, Milestone.plan_id == goal.active_plan_id
-                        )
-                    )
-                ).all()
-            )
-            if not milestones or any(m.status != "evidence_available" for m in milestones):
-                raise DomainError("insufficient_evidence", "仍有里程碑缺少完成证据")
-        goal.status, goal.control_revision = target, goal.control_revision + 1
-        op.status, op.stage = "succeeded", "saved"
-        if action in {"pause", "cancel", "complete"}:
-            pending = await db.scalars(
-                select(Operation).where(
-                    Operation.goal_id == goal.id,
-                    Operation.status.in_(["accepted", "running", "waiting_user"]),
-                )
-            )
-            for active in pending:
-                if action == "pause" and active.kind == "tutor":
-                    continue
-                active.status = "superseded" if action == "pause" else "cancelled"
-                active.stage, active.updated_at = active.status, now()
-                active.result = {"reason": f"goal_{target}"}
-                await emit(
-                    db,
-                    stream,
-                    f"operation.{active.status}",
-                    active.id,
-                    "目标状态已变化，该操作已停止",
-                    goal.id,
-                    active.id,
-                )
-        if action == "resume":
-            awaiting = await db.scalars(
-                select(Task).where(
-                    Task.goal_id == goal.id,
-                    Task.status == "awaiting_review",
-                    Task.active_submission_id.is_not(None),
-                )
-            )
-            for task in awaiting:
-                submission = await db.get(Submission, task.active_submission_id)
-                if submission is None or submission.requirements_version != task.requirements_version:
-                    continue
-                evaluated = await db.scalar(
-                    select(Evaluation.id)
-                    .where(Evaluation.submission_id == submission.id, Evaluation.valid.is_(True))
-                    .limit(1)
-                )
-                if evaluated is not None:
-                    continue
-                previous = await db.scalar(
-                    select(Operation)
-                    .where(
-                        Operation.goal_id == goal.id,
-                        Operation.kind == "assessment",
-                        Operation.status == "superseded",
-                        Operation.payload["submission_id"].as_string() == submission.id,
-                        Operation.result["reason"].as_string() == "goal_paused",
-                    )
-                    .order_by(Operation.created_at.desc())
-                    .limit(1)
-                )
-                if previous is None:
-                    continue
-                resumed, created = await new_operation(
-                    db,
-                    user,
-                    stream,
-                    f"resume-assessment:{goal.id}:{goal.control_revision}:{submission.id}",
-                    "assessment",
-                    {**previous.payload, "resumed_from_operation_id": previous.id},
-                    goal,
-                )
-                if created:
-                    resumed.versions = {**resumed.versions, "requirements_version": task.requirements_version}
-                    await dispatch(db, resumed, "submission_created")
-        if action in {"cancel", "complete"}:
-            tasks = await db.scalars(
-                select(Task).where(
-                    Task.goal_id == goal.id, Task.status.notin_(["completed", "cancelled", "skipped"])
-                )
-            )
-            for task in tasks:
-                await reserve(db, user, task.scheduled_date, -task.reserved_minutes)
-                task.reserved_minutes = 0
-                task.status = "cancelled"
-                task.state_version += 1
-        await emit(
-            db,
-            stream,
-            f"goal.{target}",
-            goal.id,
-            {"pause": "目标已暂停", "resume": "目标已恢复", "cancel": "目标已取消", "complete": "目标已完成"}[
-                action
-            ],
-            goal.id,
-            op.id,
-            goal.control_revision,
-        )
-        await dispatch(
-            db,
-            op,
-            {
-                "pause": "goal_paused",
-                "resume": "goal_resumed",
-                "cancel": "goal_cancelled",
-                "complete": "goal_completed",
-            }[action],
-        )
+        return await control_goal_in_transaction(db, user, stream, goal, action, expected_version, key)
+
+
+async def control_goal_in_transaction(db, user, stream, goal, action, expected_version, key, source_operation_id=None):
+    op, created = await new_operation(
+        db, user, stream, key, "control", {"action": action, "expected_version": expected_version}, goal
+    )
+    if not created:
         return serialize(goal)
+    version(goal.control_revision, expected_version)
+    allowed = {
+        "pause": ({"active"}, "paused"),
+        "resume": ({"paused"}, "active"),
+        "cancel": ({"draft", "active", "paused"}, "cancelled"),
+        "complete": ({"active"}, "completed"),
+    }
+    source, target = allowed[action]
+    if goal.status not in source:
+        raise DomainError("invalid_transition", "当前目标状态不允许此操作")
+    if action == "complete":
+        milestones = list(
+            (
+                await db.scalars(
+                    select(Milestone).where(
+                        Milestone.goal_id == goal.id, Milestone.plan_id == goal.active_plan_id
+                    )
+                )
+            ).all()
+        )
+        if not milestones or any(m.status != "evidence_available" for m in milestones):
+            raise DomainError("insufficient_evidence", "仍有里程碑缺少完成证据")
+    goal.status, goal.control_revision = target, goal.control_revision + 1
+    op.status, op.stage = "succeeded", "saved"
+    if action in {"pause", "cancel", "complete"}:
+        pending = await db.scalars(
+            select(Operation).where(
+                Operation.goal_id == goal.id,
+                Operation.id != source_operation_id,
+                Operation.status.in_(["accepted", "running", "waiting_user"]),
+            )
+        )
+        for active in pending:
+            if action == "pause" and active.kind == "tutor":
+                continue
+            active.status = "superseded" if action == "pause" else "cancelled"
+            active.stage, active.updated_at = active.status, now()
+            active.result = {"reason": f"goal_{target}"}
+            await emit(
+                db,
+                stream,
+                f"operation.{active.status}",
+                active.id,
+                "目标状态已变化，该操作已停止",
+                goal.id,
+                active.id,
+            )
+    if action == "resume":
+        awaiting = await db.scalars(
+            select(Task).where(
+                Task.goal_id == goal.id,
+                Task.status == "awaiting_review",
+                Task.active_submission_id.is_not(None),
+            )
+        )
+        for task in awaiting:
+            submission = await db.get(Submission, task.active_submission_id)
+            if submission is None or submission.requirements_version != task.requirements_version:
+                continue
+            evaluated = await db.scalar(
+                select(Evaluation.id)
+                .where(Evaluation.submission_id == submission.id, Evaluation.valid.is_(True))
+                .limit(1)
+            )
+            if evaluated is not None:
+                continue
+            previous = await db.scalar(
+                select(Operation)
+                .where(
+                    Operation.goal_id == goal.id,
+                    Operation.kind == "assessment",
+                    Operation.status == "superseded",
+                    Operation.payload["submission_id"].as_string() == submission.id,
+                    Operation.result["reason"].as_string() == "goal_paused",
+                )
+                .order_by(Operation.created_at.desc())
+                .limit(1)
+            )
+            if previous is None:
+                continue
+            resumed, created = await new_operation(
+                db,
+                user,
+                stream,
+                f"resume-assessment:{goal.id}:{goal.control_revision}:{submission.id}",
+                "assessment",
+                {**previous.payload, "resumed_from_operation_id": previous.id},
+                goal,
+            )
+            if created:
+                resumed.versions = {**resumed.versions, "requirements_version": task.requirements_version}
+                await dispatch(db, resumed, "submission_created")
+    if action in {"cancel", "complete"}:
+        tasks = await db.scalars(
+            select(Task).where(
+                Task.goal_id == goal.id, Task.status.notin_(["completed", "cancelled", "skipped"])
+            )
+        )
+        for task in tasks:
+            await reserve(db, user, task.scheduled_date, -task.reserved_minutes)
+            task.reserved_minutes = 0
+            task.status = "cancelled"
+            task.state_version += 1
+    await emit(
+        db,
+        stream,
+        f"goal.{target}",
+        goal.id,
+        {"pause": "目标已暂停", "resume": "目标已恢复", "cancel": "目标已取消", "complete": "目标已完成"}[
+            action
+        ],
+        goal.id,
+        op.id,
+        goal.control_revision,
+    )
+    await dispatch(
+        db,
+        op,
+        {
+            "pause": "goal_paused",
+            "resume": "goal_resumed",
+            "cancel": "goal_cancelled",
+            "complete": "goal_completed",
+        }[action],
+    )
+    return serialize(goal)
 
 
 async def accept_plan(user_id, plan_id, expected_version, accept, key):
@@ -647,68 +654,74 @@ async def edit_goal(user_id, goal_id, payload, expected_version, key):
     async with SessionFactory() as db, db.begin():
         user, stream = await lock_user(db, user_id)
         goal = await owned(db, Goal, goal_id, user_id)
-        op, created = await new_operation(
-            db,
-            user,
-            stream,
-            key,
-            "plan",
-            {
-                "instruction": "用户已明确修改目标，请根据新的目标重做计划，等待确认。",
-                "goal_changes": payload,
-                "expected_version": expected_version,
-            },
-            goal,
+        return await edit_goal_in_transaction(db, user, stream, goal, payload, expected_version, key)
+
+
+async def edit_goal_in_transaction(db, user, stream, goal, payload, expected_version, key, source_operation_id=None, instruction=None):
+    op, created = await new_operation(
+        db,
+        user,
+        stream,
+        key,
+        "plan",
+        {
+            "instruction": instruction or "用户已明确修改目标，请根据新的目标重做计划，等待确认。",
+            "goal_changes": payload,
+            "expected_version": expected_version,
+            "source_operation_id": source_operation_id,
+        },
+        goal,
+    )
+    if not created:
+        return accepted(op)
+    version(goal.control_revision, expected_version)
+    if goal.status not in {"draft", "active"}:
+        raise DomainError("goal_inactive", "请先恢复目标后再修改；已结束目标不能修改")
+    if not payload:
+        raise DomainError("empty_change", "请至少修改一个目标字段", 422)
+    for name, value in payload.items():
+        setattr(goal, name, date.fromisoformat(value) if name == "deadline" and value else value)
+    if goal.active_plan_id:
+        previous = await db.get(Plan, goal.active_plan_id)
+        previous.status = "superseded"
+    goal.status, goal.active_plan_id = "draft", None
+    goal.control_revision += 1
+    stale = await db.scalars(
+        select(Operation).where(
+            Operation.goal_id == goal.id,
+            Operation.id != op.id,
+            Operation.id != source_operation_id,
+            Operation.status.in_(["accepted", "running", "waiting_user"]),
         )
-        if not created:
-            return accepted(op)
-        version(goal.control_revision, expected_version)
-        if goal.status not in {"draft", "active"}:
-            raise DomainError("goal_inactive", "请先恢复目标后再修改；已结束目标不能修改")
-        if not payload:
-            raise DomainError("empty_change", "请至少修改一个目标字段", 422)
-        for name, value in payload.items():
-            setattr(goal, name, date.fromisoformat(value) if name == "deadline" and value else value)
-        if goal.active_plan_id:
-            previous = await db.get(Plan, goal.active_plan_id)
-            previous.status = "superseded"
-        goal.status, goal.active_plan_id = "draft", None
-        goal.control_revision += 1
-        stale = await db.scalars(
-            select(Operation).where(
-                Operation.goal_id == goal.id,
-                Operation.id != op.id,
-                Operation.status.in_(["accepted", "running", "waiting_user"]),
-            )
-        )
-        for pending in stale:
-            pending.status, pending.stage, pending.updated_at = "superseded", "superseded", now()
-            await emit(
-                db,
-                stream,
-                "operation.superseded",
-                pending.id,
-                "目标已修改，旧操作已停止",
-                goal.id,
-                pending.id,
-            )
-        tasks = await db.scalars(
-            select(Task).where(Task.goal_id == goal.id, Task.status.in_(["ready", "needs_revision"]))
-        )
-        for task in tasks:
-            await reserve(db, user, task.scheduled_date, -task.reserved_minutes)
-            task.reserved_minutes, task.status = 0, "cancelled"
-            task.state_version += 1
-        op.versions = {**op.versions, "control_revision": goal.control_revision, "active_plan_id": None}
-        await dispatch(db, op, "goal_created")
+    )
+    for pending in stale:
+        pending.status, pending.stage, pending.updated_at = "superseded", "superseded", now()
         await emit(
             db,
             stream,
-            "goal.updated",
+            "operation.superseded",
+            pending.id,
+            "目标已修改，旧操作已停止",
             goal.id,
-            "目标已修改，新计划等待生成和确认",
-            goal.id,
-            op.id,
-            goal.control_revision,
+            pending.id,
         )
-        return accepted(op)
+    tasks = await db.scalars(
+        select(Task).where(Task.goal_id == goal.id, Task.status.in_(["ready", "needs_revision"]))
+    )
+    for task in tasks:
+        await reserve(db, user, task.scheduled_date, -task.reserved_minutes)
+        task.reserved_minutes, task.status = 0, "cancelled"
+        task.state_version += 1
+    op.versions = {**op.versions, "control_revision": goal.control_revision, "active_plan_id": None}
+    await dispatch(db, op, "goal_created")
+    await emit(
+        db,
+        stream,
+        "goal.updated",
+        goal.id,
+        "目标已修改，新计划等待生成和确认",
+        goal.id,
+        op.id,
+        goal.control_revision,
+    )
+    return accepted(op)

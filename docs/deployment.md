@@ -42,6 +42,8 @@ cp .env.example .env
 
 新请求的客户端超时（包括 Pydantic AI 包装的 SDK 超时）、HTTP 408/504 及 Temporal 模型 Activity 超时会保存安全的 `model_timeout` 原因，页面显示“模型响应超时”；聊天或目标操作达到 30 分钟时显示“处理超时”。不回显供应商异常正文。旧失败记录保留原状态和原因，部署更新不会自动重试；用户可手动重试。已启动的 Workflow/Activity 保留启动时的时限，新时限用于更新后的新操作。
 
+请求预算检查同样使用从操作创建起算的 30 分钟上限；超过后拒绝后续模型调用，并归类为 `operation_timeout`。这与工作流外层限制共同生效，避免工作流尚有时间但请求预算仍在旧的 15 分钟处提前终止。
+
 ### 页面管理模型
 
 部署初始账号（`BOOTSTRAP_USERNAME`）拥有模型管理权限，API 的 `APP_MODEL_ADMIN_USERNAME` 由 Compose 注入；普通账号不显示入口，直接请求管理 API 也返回 403。管理员从侧栏“模型配置”或对话输入框的“配置模型”进入 `/settings/models`。

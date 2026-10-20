@@ -49,6 +49,16 @@ Runtime boundary `load_context` contains bounded context plus 14 days of shared 
 - `GET /bootstrap` includes the general conversation in `conversations`. Its operations have `goal_id: null, kind: "tutor"`; message shapes and SSE event names are unchanged. The global dialogue has a separate history from goal-scoped dialogues and from every other user.
 - General conversation storage requires migration `0002_general_chat`; it makes `conversations.goal_id` nullable and adds a partial unique index enforcing at most one general conversation per user.
 
+### Existing-goal commands from chat
+
+Tutor output may contain up to three `actions`, with at most one action per goal. An action has `kind` (`retry_plan`, `replan`, `update_goal`, or `cancel_goal`), `goal_id`, `expected_revision`, and `request_quote` copied from the triggering user message. `retry_plan` requires the failed planning `operation_id`; `update_goal` requires concrete `changes` limited to `background`, `outcome`, `criteria`, and `deadline`. An optional `instruction` passes the user's scheduling choice to the planner. Actions cannot be combined with `goal_draft` or `follow_up`. New goals and proposed plans still require their existing explicit confirmation.
+
+Under the user transaction lock, the backend checks ownership, goal scope, revision, quoted request, and allowed state before executing each command. The same goal-edit/cancel rules apply as in the UI. Failed checks produce a blocked receipt rather than a claimed success. A repeated retry reuses the current planning operation when one is already underway. Stable per-source keys and terminal-result checks prevent duplicate commits after activity retries.
+
+Assistant messages now include `actions: [{kind, status: "applied" | "blocked", goal_id, goal_title, operation_id, message, changes?}]`, loaded from their saved operation result. Receipts link to the actual plan operation; SSE refreshes its status. The accepted goal card uses current saved goal fields and the latest plan operation, and offers a direct retry when planning failed.
+
+Global context includes the latest ten unfinished goals with their saved requirements, revisions, plan/task counts, recent plan summaries and latest planning operation. A global `plan: null` is not evidence that those goals lack plans. Tutor history contains only bounded public turns from its own conversation, excluding future user turns and previous internal snapshots. Planning receives the latest saved goal fields plus the source chat request and recent public context. No schema migration is required.
+
 ## Personal conversation goal drafts
 
 A global tutor may return `goal_draft: {title, background, outcome, criteria, deadline}` after gathering enough information. The object rejects unknown fields; title is trimmed and 1..200 characters, background/outcome are trimmed and 1..8000 characters, criteria contains 1..20 trimmed strings of 1..500 characters each, and deadline is `YYYY-MM-DD` or null. Goal-scoped operations and a reply combining `goal_draft` with `follow_up` cannot publish a goal draft.

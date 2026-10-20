@@ -24,6 +24,8 @@ def model_failure_code(error):
     while error is not None:
         if isinstance(error, ApplicationError) and error.type == "ProviderTimeout":
             return "model_timeout"
+        if isinstance(error, ApplicationError) and error.type == "OperationDeadline":
+            return "operation_timeout"
         if (isinstance(error, ActivityError) and error.activity_type.endswith("__model_request")
                 and isinstance(error.cause, TemporalTimeoutError)):
             return "model_timeout"
