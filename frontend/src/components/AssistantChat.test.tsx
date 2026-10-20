@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import type { GoalDraft } from '../api/types'
 import { bootstrap } from '../test/fixtures'
-import { Today } from '../pages/Today'
 import { Assistant } from '../pages/Assistant'
 import { AssistantChat } from './AssistantChat'
 let data = structuredClone(bootstrap)
@@ -24,11 +23,11 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 describe('direct Agent conversation', () => {
-  it('lets a user with no goals send directly from the Today page', async () => {
+  it('lets a user with no goals send from the Assistant page', async () => {
     const command = vi.spyOn(api, 'command').mockResolvedValue({ operation_id: 'global-operation', status: 'accepted' })
     const createGoal = vi.spyOn(api, 'createGoal')
     const user = userEvent.setup()
-    render(<MemoryRouter><Today /></MemoryRouter>)
+    render(<MemoryRouter><Assistant /></MemoryRouter>)
     const input = screen.getByLabelText('给学习伙伴发消息')
     expect(input).toBeVisible()
     await user.type(input, '我想学点新东西，但还没有目标。')
