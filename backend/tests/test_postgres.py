@@ -16,6 +16,49 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.parametrize("different_payloads", [False, True])
+async def test_goal_draft_concurrent_confirmation_creates_one_goal(database, different_payloads):
+    from sqlalchemy import func
+
+    from app.db.models import Outbox
+    from test_domain import pending_goal_draft
+
+    factory, user, other = database
+    conversation, source = await pending_goal_draft(user)
+    payloads = [
+        {
+            **source["result"]["goal_draft"],
+            "title": f"目标 {index}" if different_payloads else "相同目标",
+        }
+        for index in range(6)
+    ]
+    results = await asyncio.gather(
+        *(commands.accept_goal_draft(user.id, source["id"], key(), payload) for payload in payloads),
+        return_exceptions=True,
+    )
+    successes = [item for item in results if not isinstance(item, Exception)]
+    assert len(successes) == (1 if different_payloads else 6)
+    assert len({item["resource_id"] for item in successes}) == 1
+    assert all(
+        isinstance(item, DomainError) and item.status == 409
+        for item in results
+        if isinstance(item, Exception)
+    )
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(Goal)) == 1
+        assert (
+            await db.scalar(select(func.count()).select_from(Operation).where(Operation.kind == "plan")) == 1
+        )
+        assert (
+            await db.scalar(
+                select(func.count())
+                .select_from(Outbox)
+                .where(Outbox.operation_id == successes[0]["operation_id"])
+            )
+            == 1
+        )
+
+
 async def test_concurrent_goal_confirmation_cannot_overbook(database):
     factory, user, other = database
     plans = []

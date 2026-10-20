@@ -19,3 +19,5 @@ export interface Bootstrap { task_counts?: { awaiting_review: number }; user: Us
 export interface GoalDetail { goal: Goal; plans: Plan[]; milestones: Milestone[]; tasks: Task[]; evaluations: Evaluation[]; submissions: Submission[]; skills: { id: string; name: string; status: string; evaluation_id: string | null; review_at: string | null }[]; operations: Operation[]; conversation: Conversation }
 export interface Accepted { operation_id: string; status: string; resource_id?: string }
 export interface MessagesResponse { items: Message[]; read_seq: number; last_seq: number; has_more: boolean }
+export interface GoalInput { title: string; background: string; outcome: string; criteria: string[]; deadline: string | null }
+export interface GoalDraft { operation_id: string; message_id: string; status: 'pending' | 'accepted' | 'superseded'; draft: GoalInput; goal_id: string | null; plan_operation_id: string | null }

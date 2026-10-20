@@ -3,9 +3,10 @@
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, or_, select
 
+from app.agents.schemas import GoalDraft
 from app.config import get_settings
 from app.db.models import (
     Attachment,
@@ -293,10 +294,25 @@ async def load_context(operation_id: str) -> dict:
                 for t in tasks
                 if str(t.scheduled_date) == item["local_date"] and t.status in {"ready", "needs_revision"}
             )
+        draft_states = []
+        if goal is None and conversation:
+            from app.domain.commands import goal_draft_items
+
+            draft_states = [
+                {
+                    "operation_id": item["operation_id"],
+                    "status": item["status"],
+                    "title": item["draft"]["title"],
+                    "goal_id": item["goal_id"],
+                    "plan_operation_id": item["plan_operation_id"],
+                }
+                for item in await goal_draft_items(db, conversation, limit=10)
+            ]
         return {
             "operation": {**public_operation(op), "payload": op.payload, "versions": op.versions},
             "user": public_user(user),
             "goal": serialize(goal) if goal else None,
+            "goal_drafts": draft_states,
             "goals": [
                 {"id": item.id, "title": item.title, "outcome": item.outcome[:500], "status": item.status}
                 for item in await db.scalars(
@@ -455,6 +471,14 @@ async def commit_result(operation_id: str, result: dict) -> dict:
             return public_operation(op)
         if result.get("kind", op.kind) != op.kind:
             raise DomainError("invalid_result", "Agent 输出类型与操作不符", 422)
+        draft = result.get("goal_draft")
+        if draft is not None:
+            if not global_tutor or result.get("follow_up") is not None:
+                raise DomainError("invalid_goal_draft", "仅个人对话可以提出新目标草稿", 422)
+            try:
+                draft = GoalDraft.model_validate(draft).model_dump(mode="json")
+            except ValidationError:
+                raise DomainError("invalid_goal_draft", "目标草稿字段不完整或无效", 422) from None
         content = str(result.get("message") or result.get("summary") or "处理完成。")[:32000]
         resource_id = None
         task_id = None
@@ -624,6 +648,27 @@ async def commit_result(operation_id: str, result: dict) -> dict:
         )
         op.status, op.stage, op.updated_at = "succeeded", "saved", now()
         op.result = {"resource_id": resource_id, "message_id": msg.id}
+        if draft is not None:
+            previous = await db.scalars(
+                select(Operation).where(
+                    Operation.user_id == user.id,
+                    Operation.goal_id.is_(None),
+                    Operation.kind == "tutor",
+                    Operation.status == "succeeded",
+                    Operation.payload["conversation_id"].as_string() == op.payload["conversation_id"],
+                    Operation.result["goal_draft_status"].as_string() == "pending",
+                )
+            )
+            for prior in previous:
+                prior.result = {**prior.result, "goal_draft_status": "superseded"}
+                prior.updated_at = now()
+                await emit(
+                    db, stream, "goal_draft.superseded", prior.id, "目标草稿已有更新", operation_id=prior.id
+                )
+            op.result = {**op.result, "goal_draft": draft, "goal_draft_status": "pending"}
+            await emit(
+                db, stream, "goal_draft.proposed", op.id, "目标草稿已准备，请检查并确认", operation_id=op.id
+            )
         follow_up = result.get("follow_up") if op.kind == "tutor" else None
         if isinstance(follow_up, dict) and goal is not None and goal.status in {"draft", "active"}:
             kind = follow_up.get("kind")

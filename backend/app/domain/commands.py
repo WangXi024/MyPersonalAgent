@@ -1,14 +1,17 @@
 from datetime import date
 from zoneinfo import ZoneInfo
 
+from pydantic import ValidationError
 from sqlalchemy import select
 
+from app.agents.schemas import GoalDraft
 from app.db.models import (
     Attachment,
     Conversation,
     Evaluation,
     Goal,
     MemorySource,
+    Message,
     Milestone,
     Operation,
     Outbox,
@@ -47,25 +50,136 @@ def require_active(goal):
 async def create_goal(user_id, key, payload):
     async with SessionFactory() as db, db.begin():
         user, stream = await lock_user(db, user_id)
-        existing = await db.scalar(
-            select(Operation).where(Operation.user_id == user_id, Operation.idempotency_key == key)
+        return await create_goal_in_transaction(db, user, stream, key, payload)
+
+
+async def create_goal_in_transaction(db, user, stream, key, payload):
+    existing = await db.scalar(
+        select(Operation).where(Operation.user_id == user.id, Operation.idempotency_key == key)
+    )
+    if existing:
+        if existing.request_hash != digest({"kind": "plan", "goal_id": None, "payload": payload}):
+            raise DomainError("idempotency_conflict", "幂等键已用于不同请求")
+        return accepted(existing)
+    op, _ = await new_operation(db, user, stream, key, "plan", payload)
+    goal = Goal(user_id=user.id, **payload)
+    if isinstance(goal.deadline, str):
+        goal.deadline = date.fromisoformat(goal.deadline)
+    db.add(goal)
+    await db.flush()
+    db.add(Conversation(user_id=user.id, goal_id=goal.id))
+    op.goal_id = goal.id
+    op.versions = {**op.versions, "control_revision": goal.control_revision}
+    await dispatch(db, op, "goal_created")
+    await emit(db, stream, "goal.created", goal.id, "学习目标已创建", goal.id, op.id)
+    return accepted(op)
+
+
+async def goal_draft_items(db, conversation, limit=30):
+    if conversation.goal_id is not None:
+        return []
+    operations = await db.scalars(
+        select(Operation)
+        .join(Message, Message.operation_id == Operation.id)
+        .where(
+            Message.conversation_id == conversation.id,
+            Message.role == "assistant",
+            Operation.user_id == conversation.user_id,
+            Operation.goal_id.is_(None),
+            Operation.kind == "tutor",
+            Operation.status == "succeeded",
+            Operation.result["goal_draft_status"].as_string().in_(["pending", "accepted", "superseded"]),
         )
-        if existing:
-            if existing.request_hash != digest({"kind": "plan", "goal_id": None, "payload": payload}):
-                raise DomainError("idempotency_conflict", "幂等键已用于不同请求")
-            return accepted(existing)
-        op, _ = await new_operation(db, user, stream, key, "plan", payload)
-        goal = Goal(user_id=user_id, **payload)
-        if isinstance(goal.deadline, str):
-            goal.deadline = date.fromisoformat(goal.deadline)
-        db.add(goal)
-        await db.flush()
-        db.add(Conversation(user_id=user_id, goal_id=goal.id))
-        op.goal_id = goal.id
-        op.versions = {**op.versions, "control_revision": goal.control_revision}
-        await dispatch(db, op, "goal_created")
-        await emit(db, stream, "goal.created", goal.id, "学习目标已创建", goal.id, op.id)
-        return accepted(op)
+        .order_by(Message.seq.desc())
+        .limit(limit)
+    )
+    return list(
+        reversed(
+            [
+                {
+                    "operation_id": op.id,
+                    "message_id": op.result["message_id"],
+                    "status": op.result["goal_draft_status"],
+                    "draft": op.result["goal_draft"],
+                    "goal_id": op.result.get("goal_id"),
+                    "plan_operation_id": op.result.get("plan_operation_id"),
+                }
+                for op in operations
+            ]
+        )
+    )
+
+
+async def accept_goal_draft(user_id, operation_id, key, payload):
+    try:
+        payload = GoalDraft.model_validate(payload).model_dump(mode="json")
+    except ValidationError:
+        raise DomainError("invalid_goal_draft", "请补全目标背景、成果和验收标准", 422) from None
+    async with SessionFactory() as db, db.begin():
+        user, stream = await lock_user(db, user_id)
+        source = await owned(db, Operation, operation_id, user_id)
+        conversation_id = source.payload.get("conversation_id")
+        conversation = await db.get(Conversation, conversation_id) if conversation_id else None
+        if (
+            source.goal_id is not None
+            or source.kind != "tutor"
+            or source.status != "succeeded"
+            or conversation is None
+            or conversation.user_id != user_id
+            or conversation.goal_id is not None
+            or not isinstance(source.result.get("goal_draft"), dict)
+        ):
+            raise DomainError("goal_draft_unavailable", "该操作没有可确认的个人目标草稿")
+        payload_hash = digest(payload)
+        draft_status = source.result.get("goal_draft_status")
+        if draft_status == "accepted":
+            if source.result.get("goal_draft_accept_hash") != payload_hash:
+                raise DomainError("goal_draft_conflict", "草稿已经按其他内容确认，请打开已创建目标修改")
+        elif draft_status != "pending":
+            raise DomainError("goal_draft_superseded", "该草稿已被更新，请确认最新草稿")
+        confirmation, created = await new_operation(
+            db,
+            user,
+            stream,
+            key,
+            "control",
+            {"action": "accept_goal_draft", "source_operation_id": source.id, "draft": payload},
+        )
+        if not created:
+            return confirmation.result["acceptance"]
+        if draft_status == "accepted":
+            response = source.result["goal_draft_acceptance"]
+        else:
+            plan_key = f"goal-draft:{source.id}"
+            if await db.scalar(
+                select(Operation.id).where(
+                    Operation.user_id == user_id, Operation.idempotency_key == plan_key
+                )
+            ):
+                raise DomainError("idempotency_conflict", "规划操作键已被占用")
+            response = await create_goal_in_transaction(db, user, stream, plan_key, payload)
+            source.result = {
+                **source.result,
+                "goal_draft": payload,
+                "goal_draft_status": "accepted",
+                "goal_id": response["resource_id"],
+                "plan_operation_id": response["operation_id"],
+                "goal_draft_accept_hash": payload_hash,
+                "goal_draft_acceptance": response,
+            }
+            source.updated_at = now()
+            await emit(
+                db,
+                stream,
+                "goal_draft.accepted",
+                source.id,
+                "目标草稿已确认，开始准备学习计划",
+                response["resource_id"],
+                source.id,
+            )
+        confirmation.status, confirmation.stage = "succeeded", "saved"
+        confirmation.result = {"acceptance": response}
+        return response
 
 
 async def request_operation(user_id, key, goal_id, kind, payload, proactive=False):

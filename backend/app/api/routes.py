@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
 
+from app.agents.schemas import GoalDraft
 from app.api.auth import current_user
 from app.config import get_settings
 from app.db.models import (
@@ -412,6 +413,22 @@ async def messages(
             "read_seq": conversation.read_seq,
             "has_more": bool(items and items[-1].seq < conversation.last_seq),
         }
+
+
+@router.get("/conversations/{conversation_id}/goal-drafts")
+async def goal_drafts(conversation_id: str, user=Depends(current_user)):
+    async with SessionFactory() as db:
+        conversation = await owned(db, Conversation, conversation_id, user.id)
+        return {"items": await commands.goal_draft_items(db, conversation)}
+
+
+@router.post("/goal-drafts/{operation_id}/accept", status_code=202)
+async def accept_goal_draft(
+    operation_id: str, payload: GoalDraft, user=Depends(current_user), request_key=Depends(key)
+):
+    return await commands.accept_goal_draft(
+        user.id, operation_id, request_key, payload.model_dump(mode="json")
+    )
 
 
 @router.post("/conversations/{conversation_id}/messages", status_code=202)

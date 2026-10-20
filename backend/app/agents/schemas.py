@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Proposal(BaseModel):
@@ -44,9 +44,33 @@ class TutorFollowUp(BaseModel):
     today_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
+class GoalDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=200)
+    background: str = Field(min_length=1, max_length=8000)
+    outcome: str = Field(min_length=1, max_length=8000)
+    criteria: list[str] = Field(min_length=1, max_length=20)
+    deadline: date | None = None
+
+    @field_validator("criteria")
+    @classmethod
+    def valid_criteria(cls, values: list[str]) -> list[str]:
+        values = [value.strip() for value in values]
+        if any(not value or len(value) > 500 for value in values):
+            raise ValueError("Each completion criterion must contain 1 to 500 characters")
+        return values
+
+
 class TutorProposal(Proposal):
     kind: Literal["tutor"] = "tutor"
     follow_up: TutorFollowUp | None = None
+    goal_draft: GoalDraft | None = None
+
+    @model_validator(mode="after")
+    def separate_goal_creation(self):
+        if self.goal_draft is not None and self.follow_up is not None:
+            raise ValueError("A goal draft cannot also change an existing goal")
+        return self
 
 
 class SkillEvidence(BaseModel):

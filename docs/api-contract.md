@@ -45,6 +45,43 @@ Runtime boundary `load_context` contains bounded context plus 14 days of shared 
 - A goal-scoped tutor reply can include a validated runtime `follow_up: {kind: "plan" | "recommendation", instruction, today_minutes?}`. The reply and its follow-up outbox are committed together using a stable logical key. `today_minutes` means **remaining time the user can schedule today**, never a permanent daily budget change. It can only reduce the available allocation. Plans generated this way contain `proposal.remaining_today_minutes` and `proposal.cap_date`; both generation and confirmation recheck the cap against all goals' remaining reservations. Already recorded study time is preserved.
 - Valid current assessments can enqueue a next-action recommendation. Both generation and final publication obey the user's proactive setting, quiet hours, frequency and shared budget. Failed attempts can create review tasks referencing `review_of_task_id`; the source must belong to the same goal and have valid evidence for its current requirements. A goal at least seven days old can receive one confirmable weekly plan review per ISO week, using the same contact quota.
 - `POST /assistant/conversation` creates or returns the authenticated user's single general conversation. The response is the ordinary Conversation shape, with `goal_id: null`. This mutation requires the usual CSRF token. It is intrinsically idempotent under the user lock.
-- Existing conversation messages/read and operation cancel/retry endpoints support the general conversation. General messages do not accept task references. Global tutor replies can discuss the user's goal overview but cannot silently create goals or schedule tasks; the user uses the existing goal form when ready.
+- Existing conversation messages/read and operation cancel/retry endpoints support the general conversation. General messages do not accept task references. Global tutor replies can discuss the user's goal overview and prepare an editable goal draft. A goal is created only after the user explicitly confirms its card or submits the existing goal form.
 - `GET /bootstrap` includes the general conversation in `conversations`. Its operations have `goal_id: null, kind: "tutor"`; message shapes and SSE event names are unchanged. The global dialogue has a separate history from goal-scoped dialogues and from every other user.
 - General conversation storage requires migration `0002_general_chat`; it makes `conversations.goal_id` nullable and adds a partial unique index enforcing at most one general conversation per user.
+
+## Personal conversation goal drafts
+
+A global tutor may return `goal_draft: {title, background, outcome, criteria, deadline}` after gathering enough information. The object rejects unknown fields; title is trimmed and 1..200 characters, background/outcome are trimmed and 1..8000 characters, criteria contains 1..20 trimmed strings of 1..500 characters each, and deadline is `YYYY-MM-DD` or null. Goal-scoped operations and a reply combining `goal_draft` with `follow_up` cannot publish a goal draft.
+
+The draft is saved in the completed tutor operation's result JSON. Its operation remains `succeeded` with `goal_id: null`; drafting does not create a Goal, plan operation, task, or change user settings. Publishing a new draft supersedes earlier pending drafts in that conversation while preserving accepted drafts and historical messages.
+
+`GET /conversations/{id}/goal-drafts` returns:
+
+```json
+{
+  "items": [
+    {
+      "operation_id": "source-tutor-operation-id",
+      "message_id": "assistant-message-id",
+      "status": "pending",
+      "draft": {
+        "title": "学习 Python",
+        "background": "零基础，每天有半小时",
+        "outcome": "制作文件整理工具",
+        "criteria": ["独立完成文件分类并解释错误处理"],
+        "deadline": null
+      },
+      "goal_id": null,
+      "plan_operation_id": null
+    }
+  ]
+}
+```
+
+The endpoint checks conversation ownership and returns the most recent 30 draft cards in message order. Status is `pending`, `accepted`, or `superseded`; goal conversations return an empty array. Accepted cards return the user's confirmed, edited draft and the created goal/plan-operation identifiers.
+
+`POST /goal-drafts/{operation_id}/accept` accepts the full edited draft object with the same validation above, the usual CSRF protection, and an `Idempotency-Key`. It returns HTTP 202 `{operation_id, status, resource_id}` where `operation_id` is the new plan operation and `resource_id` is the Goal ID. Confirmation atomically creates the Goal in `draft` state, its conversation, the plan operation and its outbox entry. Generated plans still require the existing plan confirmation step before activation.
+
+The original tutor operation remains global and completed. Same-content confirmation retries with either the same or a fresh key return the original acceptance response and cannot create a second goal. Each request key is recorded as a completed control operation; it cannot be reused for another command. The plan operation uses a stable key derived from the draft operation. A different confirmation payload after acceptance returns HTTP 409 `goal_draft_conflict`; an obsolete draft returns HTTP 409 `goal_draft_superseded`; invalid fields return 422; another user's draft returns 404.
+
+SSE business events `goal_draft.proposed`, `goal_draft.superseded`, and `goal_draft.accepted` prompt the frontend to refresh cards. Ordinary goal, operation and message events continue unchanged. `load_context.goal_drafts` supplies the global Agent with the latest 10 draft status summaries (`operation_id`, `status`, `title`, `goal_id`, `plan_operation_id`) so a historical proposal cannot be mistaken for a confirmed goal. No database migration is needed for drafts.

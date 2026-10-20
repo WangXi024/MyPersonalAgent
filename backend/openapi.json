@@ -894,6 +894,101 @@
         }
       }
     },
+    "/api/v1/conversations/{conversation_id}/goal-drafts": {
+      "get": {
+        "summary": "Goal Drafts",
+        "operationId": "goal_drafts_api_v1_conversations__conversation_id__goal_drafts_get",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/goal-drafts/{operation_id}/accept": {
+      "post": {
+        "summary": "Accept Goal Draft",
+        "operationId": "accept_goal_draft_api_v1_goal_drafts__operation_id__accept_post",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalDraft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/conversations/{conversation_id}/read": {
       "post": {
         "summary": "Read",
@@ -1474,6 +1569,58 @@
           "scheduled_date"
         ],
         "title": "DeferInput"
+      },
+      "GoalDraft": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "background": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Background"
+          },
+          "outcome": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Outcome"
+          },
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Criteria"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "background",
+          "outcome",
+          "criteria"
+        ],
+        "title": "GoalDraft"
       },
       "GoalEditInput": {
         "properties": {

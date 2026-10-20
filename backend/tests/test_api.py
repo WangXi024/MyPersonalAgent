@@ -93,3 +93,45 @@ async def test_attachment_upload_retry_has_one_record_and_file(database, tmp_pat
         assert len(list((tmp_path / "uploads").iterdir())) == 1
     finally:
         app.dependency_overrides.clear()
+
+
+async def test_goal_draft_list_and_confirmation_api(database):
+    from app.api.auth import current_user
+    from test_domain import pending_goal_draft
+
+    factory, user, other = database
+    conversation, source = await pending_goal_draft(user)
+    path = f"/api/v1/goal-drafts/{source['id']}/accept"
+    listing = f"/api/v1/conversations/{conversation['id']}/goal-drafts"
+    payload = source["result"]["goal_draft"]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost:8080"
+    ) as client:
+        assert (await client.get(listing)).status_code == 401
+        login = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "learner", "password": "test-only-long-password"},
+            headers={"Origin": "http://localhost:8080"},
+        )
+        headers = {"Origin": "http://localhost:8080", "Idempotency-Key": "confirm-goal-draft"}
+        assert (await client.post(path, json=payload, headers=headers)).status_code == 403
+        headers["X-CSRF-Token"] = login.json()["csrf_token"]
+        cards = (await client.get(listing)).json()["items"]
+        assert len(cards) == 1 and cards[0]["status"] == "pending"
+        invalid = await client.post(path, json={**payload, "criteria": []}, headers=headers)
+        assert invalid.status_code == 422
+        response = await client.post(path, json={**payload, "title": "确认时修改"}, headers=headers)
+        assert response.status_code == 202
+        replay = await client.post(path, json={**payload, "title": "确认时修改"}, headers=headers)
+        assert replay.status_code == 202 and replay.json() == response.json()
+        conflict = await client.post(path, json=payload, headers=headers)
+        assert conflict.status_code == 409
+        cards = (await client.get(listing)).json()["items"]
+        assert cards[0]["status"] == "accepted" and cards[0]["draft"]["title"] == "确认时修改"
+        assert cards[0]["goal_id"] == response.json()["resource_id"]
+        app.dependency_overrides[current_user] = lambda: other
+        try:
+            assert (await client.get(listing)).status_code == 404
+            assert (await client.post(path, json=payload, headers=headers)).status_code == 404
+        finally:
+            app.dependency_overrides.clear()

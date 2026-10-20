@@ -4,7 +4,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from app.agents.schemas import AssessmentProposal, PlanProposal
+from app.agents.schemas import AssessmentProposal, PlanProposal, TutorProposal
 from app.integrations.hindsight import HindsightClient, filter_recalled_memories
 
 
@@ -41,6 +41,20 @@ def test_assessment_cannot_claim_program_verified():
                 "evidence_type": "program_verified",
             }
         )
+
+
+def test_tutor_can_clarify_without_a_draft_and_cannot_emit_incomplete_or_privileged_drafts():
+    reply = {"summary": "明确目标", "message": "你现在有什么基础？"}
+    assert TutorProposal.model_validate(reply).goal_draft is None
+    draft = {"title": "学习 Python", "background": "零基础", "outcome": "完成记账工具",
+             "criteria": ["能解释核心实现"], "deadline": None}
+    for invalid in ({**draft, "background": "  "}, {**draft, "criteria": ["  "]},
+                    {**draft, "user_id": "someone-else"}, {**draft, "daily_minutes": 720}):
+        with pytest.raises(ValidationError):
+            TutorProposal.model_validate({**reply, "goal_draft": invalid})
+    with pytest.raises(ValidationError):
+        TutorProposal.model_validate({**reply, "goal_draft": draft,
+            "follow_up": {"kind": "plan", "instruction": "修改已有目标"}})
 
 
 def test_recall_excludes_deleted_untraceable_and_old_version_facts():

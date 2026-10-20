@@ -506,3 +506,143 @@ async def test_conversation_order_wait_does_not_count_as_delivery_failure(databa
         row = await db.get(Outbox, row_id)
         assert row.attempts == 1 and row.last_error is not None
         assert row.next_attempt_at.replace(tzinfo=timezone.utc) == fixed_now + timedelta(seconds=3)
+
+
+def goal_draft_result(**changes):
+    return {
+        "kind": "tutor",
+        "message": "已整理为目标草稿，请修改并确认。",
+        "goal_draft": {
+            "title": "学习 Python",
+            "background": "零基础，每天有半小时",
+            "outcome": "独立制作一个文件整理工具",
+            "criteria": ["能独立处理文件分类", "能解释错误处理"],
+            "deadline": None,
+            **changes,
+        },
+    }
+
+
+async def pending_goal_draft(user, **changes):
+    from app.api.routes import assistant_conversation
+
+    conversation = await assistant_conversation(user)
+    operation = await commands.send_message(
+        user.id, conversation["id"], {"content": "帮我整理一个学习目标"}, key()
+    )
+    result = await execution.commit_result(operation["operation_id"], goal_draft_result(**changes))
+    return conversation, result
+
+
+async def test_goal_draft_only_creates_goal_after_explicit_confirmation(database):
+    from app.db.models import Goal, Outbox, User
+
+    factory, user, other = database
+    conversation, source = await pending_goal_draft(user)
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(Goal)) == 0
+        cards = await commands.goal_draft_items(db, await db.get(Conversation, conversation["id"]))
+    assert cards[0]["status"] == "pending" and cards[0]["goal_id"] is None
+    edits = {**cards[0]["draft"], "title": "  用户修改的目标  ", "criteria": ["制作 CSV 整理工具"]}
+    request_key = key()
+    response = await commands.accept_goal_draft(user.id, source["id"], request_key, edits)
+    assert await commands.accept_goal_draft(user.id, source["id"], request_key, edits) == response
+    replay_key = key()
+    assert await commands.accept_goal_draft(user.id, source["id"], replay_key, edits) == response
+    with pytest.raises(DomainError) as reused_key:
+        await commands.create_goal(user.id, replay_key, {"title": "其他请求", "outcome": "另一目标"})
+    assert reused_key.value.code == "idempotency_conflict"
+    with pytest.raises(DomainError) as changed:
+        await commands.accept_goal_draft(user.id, source["id"], key(), {**edits, "title": "其他目标"})
+    assert changed.value.code == "goal_draft_conflict"
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(Goal)) == 1
+        goal = await db.get(Goal, response["resource_id"])
+        assert goal.title == "用户修改的目标" and goal.criteria == ["制作 CSV 整理工具"]
+        assert goal.status == "draft" and goal.active_plan_id is None
+        assert (await db.get(User, user.id)).daily_minutes == user.daily_minutes
+        tutor = await db.get(Operation, source["id"])
+        assert tutor.status == "succeeded" and tutor.goal_id is None
+        plan = await db.get(Operation, response["operation_id"])
+        assert plan.kind == "plan" and plan.goal_id == goal.id
+        outbox = await db.scalar(select(Outbox).where(Outbox.operation_id == plan.id))
+        assert outbox.payload["type"] == "goal_created"
+        assert await db.scalar(select(func.count()).select_from(Conversation)) == 2
+        cards = await commands.goal_draft_items(db, await db.get(Conversation, conversation["id"]))
+        assert cards[0]["draft"]["title"] == goal.title
+        assert cards[0]["status"] == "accepted" and cards[0]["plan_operation_id"] == plan.id
+    next_message = await commands.send_message(user.id, conversation["id"], {"content": "进度如何"}, key())
+    context = await execution.load_context(next_message["operation_id"])
+    assert context["goal_drafts"][0]["status"] == "accepted"
+    assert context["goal_drafts"][0]["goal_id"] == goal.id
+
+
+async def test_new_goal_draft_supersedes_only_pending_drafts(database):
+    from app.db.models import Goal
+
+    factory, user, other = database
+    conversation, first = await pending_goal_draft(user)
+    _, second = await pending_goal_draft(user, title="更新后的目标")
+    with pytest.raises(DomainError) as superseded:
+        await commands.accept_goal_draft(user.id, first["id"], key(), first["result"]["goal_draft"])
+    assert superseded.value.code == "goal_draft_superseded"
+    with pytest.raises(DomainError) as forbidden:
+        await commands.accept_goal_draft(other.id, second["id"], key(), second["result"]["goal_draft"])
+    assert forbidden.value.status == 404
+    accepted = await commands.accept_goal_draft(user.id, second["id"], key(), second["result"]["goal_draft"])
+    _, third = await pending_goal_draft(user, title="另一个目标草稿")
+    async with factory() as db:
+        cards = await commands.goal_draft_items(db, await db.get(Conversation, conversation["id"]))
+        assert [card["status"] for card in cards] == ["superseded", "accepted", "pending"]
+        assert cards[1]["goal_id"] == accepted["resource_id"]
+        assert await db.scalar(select(func.count()).select_from(Goal)) == 1
+        for card in cards:
+            assert (await db.get(Operation, card["operation_id"])).status == "succeeded"
+    context = await execution.load_context(third["id"])
+    assert [item["status"] for item in context["goal_drafts"]] == ["superseded", "accepted", "pending"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"background": "  "},
+        {"criteria": []},
+        {"criteria": [" "]},
+        {"criteria": ["x" * 501]},
+        {"daily_minutes": 120},
+        {"deadline": "not-a-date"},
+    ],
+)
+async def test_invalid_goal_draft_cannot_be_persisted(database, changes):
+    from app.api.routes import assistant_conversation
+    from app.db.models import Goal
+
+    factory, user, other = database
+    conversation = await assistant_conversation(user)
+    operation = await commands.send_message(user.id, conversation["id"], {"content": "目标"}, key())
+    with pytest.raises(DomainError) as invalid:
+        await execution.commit_result(operation["operation_id"], goal_draft_result(**changes))
+    assert invalid.value.code == "invalid_goal_draft" and invalid.value.status == 422
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(Goal)) == 0
+        assert (await db.get(Operation, operation["operation_id"])).status == "accepted"
+        assert (await db.get(Conversation, conversation["id"])).last_seq == 1
+
+
+async def test_goal_scoped_chat_cannot_propose_new_goal(database):
+    factory, user, other = database
+    goal, task, plan = await active_goal(user)
+    async with factory() as db:
+        conversation = await db.scalar(select(Conversation).where(Conversation.goal_id == goal["id"]))
+    operation = await commands.send_message(user.id, conversation.id, {"content": "创建另一个目标"}, key())
+    with pytest.raises(DomainError) as invalid:
+        await execution.commit_result(operation["operation_id"], goal_draft_result())
+    assert invalid.value.code == "invalid_goal_draft"
+    await execution.commit_result(operation["operation_id"], {"kind": "tutor", "message": "请在个人对话整理"})
+    with pytest.raises(DomainError) as unavailable:
+        await commands.accept_goal_draft(
+            user.id, operation["operation_id"], key(), goal_draft_result()["goal_draft"]
+        )
+    assert unavailable.value.code == "goal_draft_unavailable"
+    async with factory() as db:
+        assert await commands.goal_draft_items(db, conversation) == []

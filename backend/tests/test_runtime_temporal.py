@@ -244,3 +244,103 @@ async def test_personal_chat_uses_durable_serial_inbox_without_creating_a_goal(d
         assert len(calls) == 2
         assert len(calls[1]) > len(calls[0])  # The canonical previous turn is continued.
         await client.get_workflow_handle(f"assistant-{user.id}").cancel()
+
+
+async def test_chat_clarifies_then_drafts_and_only_confirmation_starts_planning(database, monkeypatch):
+    import asyncio
+    from datetime import date
+
+    from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.usage import RequestUsage
+    from temporalio.client import Client
+    from temporalio.worker import Worker
+
+    from app.api.routes import assistant_conversation, goal_drafts
+    from app.db.models import Goal, Operation, Outbox, Plan, Task
+    from app.dispatcher import deliver
+    from app.domain import commands
+    from app.integrations.settings import runtime_settings
+    from app.workflows.activities import ACTIVITIES
+    from app.workflows.learning import AssistantWorkflow, GoalWorkflow, OperationWorkflow
+
+    factory, user, _ = database
+    conversation = await assistant_conversation(user)
+    draft = {"title": "学习 Python", "background": "零基础", "outcome": "完成求和小工具",
+             "criteria": ["能解释函数输入输出"], "deadline": None}
+    calls = []
+
+    async def respond(self, messages, model_settings, model_request_parameters, **kwargs):
+        tool = model_request_parameters.output_tools[0]
+        planning = "milestones" in tool.parameters_json_schema.get("properties", {})
+        calls.append("plan" if planning else "tutor")
+        if planning:
+            output = {"kind": "plan", "summary": "先掌握函数", "message": "计划已准备，请确认。",
+                "milestones": [{"title": "函数", "criteria": ["能解释函数输入输出"]}],
+                "tasks": [{"title": "实现求和函数", "instructions": "实现并解释输入输出",
+                    "estimated_minutes": 15, "scheduled_date": date.today().isoformat(),
+                    "milestone_index": 0, "criteria": ["能解释函数输入输出"], "skills": ["函数"]}]}
+        else:
+            output = {"kind": "tutor", "summary": "整理目标", "follow_up": None,
+                "message": "你现在有什么基础？" if len(calls) == 1 else "请检查下方草稿并确认创建。",
+                "goal_draft": None if len(calls) == 1 else draft}
+        return ModelResponse(parts=[ToolCallPart(tool.name, output)],
+            usage=RequestUsage(input_tokens=30, output_tokens=50), model_name="test-provider")
+
+    monkeypatch.setattr(OpenAIChatModel, "request", respond)
+    monkeypatch.setattr(runtime_settings(), "litellm_api_key", SecretStr("test-only-not-a-provider-key"))
+    queue = f"test-chat-goal-{uuid4()}"
+    monkeypatch.setattr(runtime_settings(), "temporal_task_queue", queue)
+    client = await Client.connect(os.environ["TEMPORAL_TEST_ADDRESS"],
+        namespace=os.getenv("TEMPORAL_TEST_NAMESPACE", "learning-agent"), plugins=[PydanticAIPlugin()])
+
+    async def dispatch_and_finish(operation_id):
+        async with factory() as db:
+            item = await db.scalar(select(Outbox).where(Outbox.operation_id == operation_id,
+                                                       Outbox.kind == "temporal"))
+            command = {"id": item.id, "kind": item.kind, "payload": item.payload}
+        await deliver(client, command)
+        for _ in range(200):
+            async with factory() as db:
+                operation = await db.get(Operation, operation_id)
+                if operation.status in {"succeeded", "failed", "superseded"}:
+                    assert operation.status == "succeeded", operation.error_code
+                    return
+            await asyncio.sleep(0.1)
+        raise AssertionError("Operation did not finish")
+
+    goal_id = None
+    async with Worker(client, task_queue=queue, workflows=[AssistantWorkflow, GoalWorkflow, OperationWorkflow],
+                      activities=ACTIVITIES):
+        try:
+            first = await commands.send_message(user.id, conversation["id"],
+                {"content": "我想学习 Python"}, str(uuid4()))
+            await dispatch_and_finish(first["operation_id"])
+            assert (await goal_drafts(conversation["id"], user))["items"] == []
+            second = await commands.send_message(user.id, conversation["id"],
+                {"content": "零基础，希望完成求和小工具，能解释输入输出。"}, str(uuid4()))
+            await dispatch_and_finish(second["operation_id"])
+            cards = (await goal_drafts(conversation["id"], user))["items"]
+            assert len(cards) == 1 and cards[0]["status"] == "pending"
+            async with factory() as db:
+                assert await db.scalar(select(Goal).where(Goal.user_id == user.id)) is None
+            edited = {**draft, "title": "我的第一个 Python 工具"}
+            accepted = await commands.accept_goal_draft(user.id, second["operation_id"], str(uuid4()), edited)
+            goal_id = accepted["resource_id"]
+            assert await commands.accept_goal_draft(user.id, second["operation_id"], str(uuid4()), edited) == accepted
+            await dispatch_and_finish(accepted["operation_id"])
+            async with factory() as db:
+                goal = await db.get(Goal, goal_id)
+                assert goal.title == edited["title"] and goal.status == "draft"
+                plan = await db.scalar(select(Plan).where(Plan.goal_id == goal_id))
+                assert plan.status == "proposed"
+                assert await db.scalar(select(Task).where(Task.goal_id == goal_id)) is None
+                assert (await db.get(Operation, second["operation_id"])).goal_id is None
+            cards = (await goal_drafts(conversation["id"], user))["items"]
+            assert cards[0]["status"] == "accepted" and cards[0]["goal_id"] == goal_id
+            assert calls == ["tutor", "tutor", "plan"]
+        finally:
+            workflow_ids = [f"assistant-{user.id}"] + ([f"goal-{user.id}-{goal_id}"] if goal_id else [])
+            for workflow_id in workflow_ids:
+                await client.get_workflow_handle(workflow_id).cancel()
