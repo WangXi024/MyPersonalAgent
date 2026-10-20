@@ -3,7 +3,7 @@ import { api, newRequestKey } from '../api/client'
 import { useApp } from '../state'
 import { Conversation } from './Conversation'
 
-export function AssistantChat({ compact = false }: { compact?: boolean }) {
+export function AssistantChat({ compact = false, workspace = false }: { compact?: boolean; workspace?: boolean }) {
   const { data } = useApp()
   const existingId = data?.conversations.find(conversation => conversation.goal_id === null)?.id
   const [createdId, setCreatedId] = useState<string | null>(null)
@@ -18,5 +18,5 @@ export function AssistantChat({ compact = false }: { compact?: boolean }) {
     finally { inFlight.current = false }
   }, [existingId, createdId])
   useEffect(() => { void connect() }, [connect])
-  return <Conversation conversationId={existingId ?? createdId} operations={data?.operations.filter(operation => operation.goal_id === null && operation.kind === 'tutor') ?? []} compact={compact} connectionError={error} retryConnect={() => void connect()} />
+  return <Conversation conversationId={existingId ?? createdId} operations={data?.operations.filter(operation => operation.goal_id === null && operation.kind === 'tutor') ?? []} compact={compact} workspace={workspace} connectionError={error} retryConnect={() => void connect()} />
 }

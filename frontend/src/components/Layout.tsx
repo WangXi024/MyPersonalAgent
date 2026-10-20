@@ -1,5 +1,5 @@
 import { ArrowUpRight, BookOpen, CircleHelp, Compass, LogOut, MessageCircle, Plus, Settings2, Sprout, Sun, WifiOff } from 'lucide-react'
-import { NavLink, Outlet, Link, Navigate } from 'react-router-dom'
+import { NavLink, Outlet, Link, Navigate, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { useApp } from '../state'
 import { ApiError } from '../api/client'
@@ -8,11 +8,12 @@ import { ErrorNotice, Loading } from './ui'
 export function Layout() {
   const { data, loading, error, connection, syncedAt, refresh, signOut } = useApp()
   const [logoutError, setLogoutError] = useState<Error | null>(null)
+  const workspace = useLocation().pathname === '/assistant'
   if (loading) return <main className="full-screen"><Loading /></main>
   if (!data && error instanceof ApiError && error.status === 401) return <Navigate to="/login" replace />
   if (!data) return <main className="full-screen"><div className="card"><h1>暂时无法打开工作台</h1><ErrorNotice error={error} retry={() => void refresh()} /></div></main>
   const goals = data.goals.filter(goal => goal.status !== 'cancelled')
-  return <div className="app-shell">
+  return <div className={`app-shell${workspace ? ' assistant-shell' : ''}`}>
     <a className="skip-link" href="#main-content">跳到主要内容</a>
     <aside className="sidebar">
       <Link to="/today" className="brand"><span className="brand-symbol"><Sprout size={25} strokeWidth={1.8} /></span><span>知行<small>PERSONAL LEARNING</small></span></Link>

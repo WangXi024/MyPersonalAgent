@@ -1,11 +1,28 @@
-import { ArrowRight, Compass, Plus, Sprout } from 'lucide-react'
+import { ArrowRight, Compass, PanelRight, Plus, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AssistantChat } from '../components/AssistantChat'
-import { PageHeading, SectionHeading, Status } from '../components/ui'
+import { OperationCard, SectionHeading, Status } from '../components/ui'
 import { useApp } from '../state'
 
 export function Assistant() {
-  const { data } = useApp()
+  const { data, connection } = useApp()
+  const [progressOpen, setProgressOpen] = useState(false)
+  const progressToggle = useRef<HTMLButtonElement>(null)
+  const progressClose = useRef<HTMLButtonElement>(null)
+  useEffect(() => { if (progressOpen) progressClose.current?.focus() }, [progressOpen])
   const goals = data?.goals.filter(goal => !['cancelled', 'completed'].includes(goal.status)) ?? []
-  return <><PageHeading eyebrow="你的学习伙伴，随时在这里" title="和 Agent 聊聊" description="从一个问题、一点好奇，或者今天的状态开始。无需先创建目标。" /><div className="assistant-page-grid"><AssistantChat /><aside className="assistant-goals"><SectionHeading title="你的学习方向" />{goals.length ? goals.map(goal => <Link className="assistant-goal-link card" to={`/goals/${goal.id}/learn`} key={goal.id}><div className="row spread"><Compass size={17} /><Status value={goal.status} /></div><strong>{goal.title}</strong><span>进入这个目标的学习对话<ArrowRight size={14} /></span></Link>) : <div className="card compact-card"><Sprout size={25} /><h3>先聊一聊，也很好。</h3><p>还没有明确目标时，Agent 可以帮你梳理兴趣、基础和可用时间。</p></div>}<Link className="button secondary full-width" to="/goals/new"><Plus size={16} />创建一个学习目标</Link><p className="assistant-boundary">Agent 可以在对话中整理目标草稿。由你修改、确认创建后准备计划，计划仍需单独确认；每天的共享时间沿用设置。</p></aside></div></>
+  const operations = data?.operations.filter(operation => ['accepted', 'running', 'waiting_user', 'failed'].includes(operation.status)) ?? []
+  const closeProgress = () => { setProgressOpen(false); progressToggle.current?.focus() }
+  return <section className={`assistant-workspace${progressOpen ? ' progress-open' : ''}`}>
+    <header className="assistant-toolbar"><div className="assistant-toolbar-title"><h1>和 Agent 聊聊</h1><span className={`assistant-sync ${connection}`} role="status">{connection === 'connected' ? '已同步' : connection === 'reconnecting' ? '重连中' : '连接中'}</span></div><button className="text-button assistant-progress-toggle" type="button" ref={progressToggle} aria-expanded={progressOpen} aria-controls="assistant-progress" onClick={() => setProgressOpen(value => !value)}><PanelRight size={17} />学习进度</button></header>
+    <div className="assistant-workspace-body">
+      <AssistantChat workspace />
+      <aside className="assistant-progress" id="assistant-progress" aria-label="学习进度" hidden={!progressOpen} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); closeProgress() } }}>
+        <div className="assistant-progress-heading row spread"><h2>学习进度</h2><button className="icon-button" type="button" ref={progressClose} aria-label="收起学习进度" onClick={closeProgress}><X size={17} /></button></div>
+        <div className="assistant-goals"><SectionHeading title="学习目标" />{goals.length ? goals.map(goal => <Link className="assistant-goal-link card" to={`/goals/${goal.id}`} key={goal.id}><div className="row spread"><Compass size={17} /><Status value={goal.status} /></div><strong>{goal.title}</strong><span>查看目标与计划<ArrowRight size={14} /></span></Link>) : <p className="assistant-progress-empty">还没有学习目标，可以在对话中一起整理。</p>}<Link className="text-button" to="/goals/new"><Plus size={15} />创建学习目标</Link></div>
+        <section className="assistant-operations"><SectionHeading title="当前操作" />{operations.length ? operations.map(operation => <div className="assistant-operation" key={operation.id}><OperationCard operation={operation} />{operation.goal_id && <Link className="text-button" to={`/goals/${operation.goal_id}`}>{data?.goals.find(goal => goal.id === operation.goal_id)?.title ?? '查看关联目标'}<ArrowRight size={13} /></Link>}</div>) : <p className="assistant-progress-empty">暂时没有待处理的操作。</p>}</section>
+      </aside>
+    </div>
+  </section>
 }
