@@ -85,6 +85,17 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(models[1], {"id": "learning-fallback", "name": "test-fallback", "provider": "zhipu",
                                     "api_base": "https://example.test/v1", "usd_cny_rate": "7"})
 
+    def test_gateway_allows_long_planning_calls_even_with_legacy_timeout(self):
+        for configured, expected in ((90, 330), (330, 330), (400, 400)):
+            with self.subTest(timeout=configured):
+                Path(".env").write_text(self.text + f"\nMODEL_REQUEST_TIMEOUT={configured}")
+                self.run_configure()
+                config = json.loads(Path(".runtime/litellm.json").read_text())
+                self.assertEqual(config["router_settings"]["timeout"], expected)
+                self.assertEqual(config["model_list"][0]["litellm_params"]["timeout"], expected)
+                self.assertEqual(config["router_settings"]["num_retries"], 0)
+                self.assertEqual(config["litellm_settings"]["num_retries"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

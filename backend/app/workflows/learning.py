@@ -4,7 +4,8 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import CancelledError, FailureError
+from temporalio.exceptions import ActivityError, ApplicationError, CancelledError, FailureError
+from temporalio.exceptions import TimeoutError as TemporalTimeoutError
 
 with workflow.unsafe.imports_passed_through():
     from pydantic_ai.durable_exec.temporal import PydanticAIWorkflow
@@ -17,6 +18,17 @@ with workflow.unsafe.imports_passed_through():
 
 DB_OPTIONS = {"start_to_close_timeout": timedelta(seconds=30),
               "retry_policy": RetryPolicy(maximum_attempts=5)}
+
+
+def model_failure_code(error):
+    while error is not None:
+        if isinstance(error, ApplicationError) and error.type == "ProviderTimeout":
+            return "model_timeout"
+        if (isinstance(error, ActivityError) and error.activity_type.endswith("__model_request")
+                and isinstance(error.cause, TemporalTimeoutError)):
+            return "model_timeout"
+        error = error.__cause__
+    return "agent_failed"
 
 
 @workflow.defn
@@ -54,7 +66,7 @@ class OperationWorkflow(PydanticAIWorkflow):
             # Do not persist provider exceptions: they may contain credentials or user payloads.
             workflow.logger.warning("Operation %s failed: %s", operation_id, type(error).__name__)
             return await workflow.execute_activity(activities.fail_operation, {
-                "operation_id": operation_id, "code": "agent_failed",
+                "operation_id": operation_id, "code": model_failure_code(error),
                 "message": "本次处理未完成，请检查模型服务配置或稍后重试。"}, **DB_OPTIONS)
 
 
@@ -120,7 +132,8 @@ class GoalWorkflow:
                     # A cancelled/duplicate child cannot bypass the database's publication fence.
                     workflow.logger.warning("Operation child ended: %s", type(error).__name__)
                     await workflow.execute_activity(activities.fail_operation, {
-                        "operation_id": command["operation_id"], "code": "interrupted",
+                        "operation_id": command["operation_id"],
+                        "code": "operation_timeout" if isinstance(error.cause, TemporalTimeoutError) else "interrupted",
                         "message": "处理已中断，可稍后重试。"}, **DB_OPTIONS)
                 finally:
                     self.current = None

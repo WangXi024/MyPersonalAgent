@@ -64,11 +64,14 @@ def build_agent(kind: str, output_type: type) -> Agent:
         deps_type=dict,
         instructions=INSTRUCTIONS,
         retries=2,
-        model_settings={"max_tokens": settings.model_output_tokens, "timeout": 90},
+        model_settings={"max_tokens": settings.model_output_tokens, "timeout": 300 if kind == "plan" else 90},
         capabilities=[TemporalDurability(activity_config={
             "start_to_close_timeout": timedelta(minutes=3),
             "retry_policy": RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=2)),
-        })],
+        }, model_activity_config={
+            "start_to_close_timeout": timedelta(seconds=360),
+            "retry_policy": RetryPolicy(maximum_attempts=2, initial_interval=timedelta(seconds=2)),
+        } if kind == "plan" else None)],
     )
 
     @agent.tool

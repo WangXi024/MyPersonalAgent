@@ -93,7 +93,7 @@ def configure(env_file, check_only=False, infrastructure_only=False):
                 raise ValueError()
         except ValueError:
             raise ValueError(name + " must be positive") from None
-    for name, default in (("APP_PORT", "8080"), ("APP_TLS_PORT", "8443"), ("MODEL_REQUEST_TIMEOUT", "90"), ("DEPLOY_TIMEOUT", "1800")):
+    for name, default in (("APP_PORT", "8080"), ("APP_TLS_PORT", "8443"), ("MODEL_REQUEST_TIMEOUT", "330"), ("DEPLOY_TIMEOUT", "1800")):
         if not cfg.get(name, default).isdigit() or int(cfg.get(name, default)) < 1:
             raise ValueError(name + " must be a positive integer")
     if check_only:
@@ -119,10 +119,12 @@ def configure(env_file, check_only=False, infrastructure_only=False):
         path.chmod(0o444)
     models = []
     chat_models = []
+    # Leave headroom for the planner's 300-second client timeout, including older .env files.
+    gateway_timeout = max(330, int(cfg.get("MODEL_REQUEST_TIMEOUT", "330")))
     for alias, provider in (("learning-agent", primary), ("learning-fallback", fallback)):
         if provider:
             prefix = provider.upper()
-            model = {"model_name": alias, "litellm_params": {"model": "openai/" + cfg[prefix + "_MODEL"], "api_base": cfg[prefix + "_API_BASE"], "api_key": "os.environ/" + prefix + "_API_KEY", "timeout": int(cfg.get("MODEL_REQUEST_TIMEOUT", "90"))}}
+            model = {"model_name": alias, "litellm_params": {"model": "openai/" + cfg[prefix + "_MODEL"], "api_base": cfg[prefix + "_API_BASE"], "api_key": "os.environ/" + prefix + "_API_KEY", "timeout": gateway_timeout}}
             costs = {direction.lower() + "_cost_per_token": float(cfg[prefix + "_" + direction + "_USD_PER_MILLION"]) / 1000000 for direction in ("INPUT", "OUTPUT") if valid(cfg.get(prefix + "_" + direction + "_USD_PER_MILLION", ""))}
             if costs:
                 model["model_info"] = {"mode": "chat", **costs}
@@ -134,7 +136,7 @@ def configure(env_file, check_only=False, infrastructure_only=False):
                 if valid(price):
                     display[direction.lower() + "_cny_per_million"] = str((Decimal(price) * 7).quantize(Decimal("0.000001")))
             chat_models.append(display)
-    config = {"model_list": models, "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY", "database_url": "os.environ/DATABASE_URL", "store_model_in_db": True}, "litellm_settings": {"drop_params": False, "num_retries": 0, "set_verbose": False, "json_logs": True, "turn_off_message_logging": True}, "router_settings": {"num_retries": 0, "timeout": int(cfg.get("MODEL_REQUEST_TIMEOUT", "90"))}}
+    config = {"model_list": models, "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY", "database_url": "os.environ/DATABASE_URL", "store_model_in_db": True}, "litellm_settings": {"drop_params": False, "num_retries": 0, "set_verbose": False, "json_logs": True, "turn_off_message_logging": True}, "router_settings": {"num_retries": 0, "timeout": gateway_timeout}}
     if fallback:
         config["router_settings"]["fallbacks"] = [{"learning-agent": ["learning-fallback"]}]
     Path(".runtime/litellm.json").write_text(json.dumps(config, ensure_ascii=False, indent=2))

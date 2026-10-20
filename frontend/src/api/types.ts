@@ -9,7 +9,7 @@ export interface Plan { id: string; goal_id: string; version: number; status: st
 export interface Evaluation { id: string; submission_id: string; passed: boolean; feedback: string; evidence_type: string; valid: boolean; details: Record<string, unknown>; created_at: string }
 export interface Submission { id: string; task_id: string; text: string; created_at: string; attachment_ids?: string[] }
 export interface Message { id: string; seq: number; role: string; type: string; content: string; task_id?: string | null; operation_id?: string | null; created_at: string }
-export interface Operation { id: string; kind: string; status: OperationStatus; goal_id: string | null; stage?: string | null; error_message?: string | null; created_at: string; updated_at?: string }
+export interface Operation { id: string; kind: string; status: OperationStatus; goal_id: string | null; stage?: string | null; error_code?: string | null; error_message?: string | null; created_at: string; updated_at?: string }
 export interface Activity { seq: number; type: string; summary: string; goal_id?: string | null; operation_id?: string | null; created_at: string }
 export interface DailyBudget { local_date: string; authorized_minutes: number; consumed_minutes: number; reserved_minutes: number }
 export type Settings = User

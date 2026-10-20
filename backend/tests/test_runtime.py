@@ -147,7 +147,7 @@ def test_provider_sdk_cannot_retry_behind_the_operation_budget():
     assert all(agent.model.wrapped.provider.client.max_retries == 0 for agent in AGENTS.values())
 
 
-@pytest.mark.parametrize("status,non_retryable", [(401, True), (503, False)])
+@pytest.mark.parametrize("status,non_retryable", [(401, True), (503, False), (408, False), (504, False)])
 async def test_provider_error_body_cannot_enter_workflow_failure(monkeypatch, status, non_retryable):
     from pydantic_ai.exceptions import ModelHTTPError
     from pydantic_ai.models import ModelRequestParameters
@@ -173,5 +173,30 @@ async def test_provider_error_body_cannot_enter_workflow_failure(monkeypatch, st
                                            ModelRequestParameters())
     assert reservations == [("test-operation", 6)]
     assert caught.value.non_retryable is non_retryable
+    assert caught.value.type == ("ProviderTimeout" if status in {408, 504} else "ProviderRequestFailed")
     assert "private-provider-payload" not in str(caught.value)
     assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+async def test_timeout_message_is_safe_and_does_not_relabel_other_errors(database):
+    from temporalio.exceptions import ActivityError, ApplicationError, TimeoutError, TimeoutType
+
+    from app.domain import commands, execution
+    from app.workflows.learning import model_failure_code
+
+    _, user, _ = database
+    command = await commands.create_goal(user.id, "timeout-message-test", {
+        "title": "超时验证", "background": "本地测试", "outcome": "保留目标", "criteria": ["可以重试"]})
+    wrapper = ActivityError("private-error", scheduled_event_id=1, started_event_id=2, identity="test",
+                            activity_type="agent__learning_plan_v1__model_request", activity_id="1", retry_state=None)
+    wrapper.__cause__ = ApplicationError("private-provider-payload", type="ProviderTimeout")
+    assert model_failure_code(wrapper) == "model_timeout"
+    wrapper.__cause__ = TimeoutError("private-timeout", type=TimeoutType.START_TO_CLOSE, last_heartbeat_details=[])
+    assert model_failure_code(wrapper) == "model_timeout"
+    wrapper.__cause__ = ApplicationError("private-network-error", type="ProviderRequestFailed")
+    assert model_failure_code(wrapper) == "agent_failed"
+    result = await execution.mark_failed(command["operation_id"], "model_timeout", "private-provider-payload")
+    assert result["status"] == "failed"
+    assert result["error_code"] == "model_timeout"
+    assert "模型响应超时" in result["error_message"] and "private" not in result["error_message"]
+    assert (await execution.mark_failed(command["operation_id"], "agent_failed", "other")) == result
