@@ -175,6 +175,7 @@ async def test_gateway_uses_named_credentials_prices_and_restricted_inference_ke
         assert len(models) == 1
         model = models[0]
         assert model["litellm_params"]["litellm_credential_name"] == "named-credential"
+        assert model["litellm_params"]["timeout"] == 630
         assert "api_key" not in model["litellm_params"]
         assert model["model_info"]["access_groups"] == ["learning-configured"]
         assert model["model_info"]["input_cost_per_token"] == pytest.approx(12 / 7 / 1000000)

@@ -85,8 +85,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(models[1], {"id": "learning-fallback", "name": "test-fallback", "provider": "zhipu",
                                     "api_base": "https://example.test/v1", "usd_cny_rate": "7"})
 
-    def test_gateway_allows_long_planning_calls_even_with_legacy_timeout(self):
-        for configured, expected in ((90, 330), (330, 330), (400, 400)):
+    def test_gateway_allows_long_chat_and_planning_calls_even_with_legacy_timeout(self):
+        for configured, expected in ((90, 630), (330, 630), (630, 630), (700, 700)):
             with self.subTest(timeout=configured):
                 Path(".env").write_text(self.text + f"\nMODEL_REQUEST_TIMEOUT={configured}")
                 self.run_configure()

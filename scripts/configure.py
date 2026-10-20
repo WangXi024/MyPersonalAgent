@@ -93,7 +93,7 @@ def configure(env_file, check_only=False, infrastructure_only=False):
                 raise ValueError()
         except ValueError:
             raise ValueError(name + " must be positive") from None
-    for name, default in (("APP_PORT", "8080"), ("APP_TLS_PORT", "8443"), ("MODEL_REQUEST_TIMEOUT", "330"), ("DEPLOY_TIMEOUT", "1800")):
+    for name, default in (("APP_PORT", "8080"), ("APP_TLS_PORT", "8443"), ("MODEL_REQUEST_TIMEOUT", "630"), ("DEPLOY_TIMEOUT", "1800")):
         if not cfg.get(name, default).isdigit() or int(cfg.get(name, default)) < 1:
             raise ValueError(name + " must be a positive integer")
     if check_only:
@@ -119,8 +119,8 @@ def configure(env_file, check_only=False, infrastructure_only=False):
         path.chmod(0o444)
     models = []
     chat_models = []
-    # Leave headroom for the planner's 300-second client timeout, including older .env files.
-    gateway_timeout = max(330, int(cfg.get("MODEL_REQUEST_TIMEOUT", "330")))
+    # Leave headroom for 600-second chat/planning requests, including older .env files.
+    gateway_timeout = max(630, int(cfg.get("MODEL_REQUEST_TIMEOUT", "630")))
     for alias, provider in (("learning-agent", primary), ("learning-fallback", fallback)):
         if provider:
             prefix = provider.upper()

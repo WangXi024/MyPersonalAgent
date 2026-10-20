@@ -13,18 +13,20 @@ pytestmark = pytest.mark.skipif(not os.getenv("TEMPORAL_TEST_ADDRESS"), reason="
 
 
 @pytest.mark.parametrize("scenario,expected_calls", [("timeout", 2), ("recover", 2), ("authentication", 1)])
-async def test_planner_timeout_retries_once_and_preserves_the_goal(database, monkeypatch, scenario, expected_calls):
-    import httpx
+@pytest.mark.parametrize("kind", ["plan", "tutor"])
+async def test_long_requests_retry_once_and_preserve_saved_content(database, monkeypatch, scenario, expected_calls, kind):
+    import httpx2
     from openai import APITimeoutError
     from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
-    from pydantic_ai.exceptions import ModelHTTPError
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.usage import RequestUsage
     from temporalio.client import Client
     from temporalio.worker import Replayer, Worker
 
-    from app.db.models import Goal, Operation, Plan
+    from app.api.routes import assistant_conversation
+    from app.db.models import Goal, Message, Operation, Plan
     from app.domain import commands
     from app.integrations.settings import runtime_settings
     from app.workflows.activities import ACTIVITIES
@@ -39,41 +41,53 @@ async def test_planner_timeout_retries_once_and_preserves_the_goal(database, mon
         if scenario == "authentication":
             raise ModelHTTPError(401, "test-model", body="private-test-payload")
         if scenario == "timeout" or len(calls) == 1:
-            raise APITimeoutError(request=httpx.Request("POST", "https://local-test.invalid/v1"))
+            raise ModelAPIError("test-model", "private-timeout") from APITimeoutError(
+                request=httpx2.Request("POST", "https://local-test.invalid/v1"))
         from datetime import date
         output = {"kind": "plan", "summary": "测试恢复", "message": "请确认",
                   "milestones": [{"title": "练习", "criteria": ["完成练习"]}],
                   "tasks": [{"title": "测试任务", "instructions": "完成练习", "estimated_minutes": 10,
                              "scheduled_date": date.today().isoformat(), "milestone_index": 0,
                              "criteria": ["完成练习"]}]}
+        if kind == "tutor":
+            output = {"kind": "tutor", "summary": "测试恢复", "message": "已准备好，可以继续学习。"}
         return ModelResponse(parts=[ToolCallPart(model_request_parameters.output_tools[0].name, output)],
                              usage=RequestUsage(input_tokens=20, output_tokens=30), model_name="test-provider")
 
     monkeypatch.setattr(OpenAIChatModel, "request", request)
-    command = await commands.create_goal(user.id, str(uuid4()), {
-        "title": "规划超时测试", "background": "本地测试", "outcome": "保留目标", "criteria": ["可重试"]})
+    if kind == "plan":
+        command = await commands.create_goal(user.id, str(uuid4()), {
+            "title": "规划超时测试", "background": "本地测试", "outcome": "保留目标", "criteria": ["可重试"]})
+    else:
+        conversation = await assistant_conversation(user)
+        command = await commands.send_message(user.id, conversation["id"], {"content": "请帮助我学习"}, str(uuid4()))
     client = await Client.connect(os.environ["TEMPORAL_TEST_ADDRESS"],
         namespace=os.getenv("TEMPORAL_TEST_NAMESPACE", "learning-agent"), plugins=[PydanticAIPlugin()])
     queue, workflow_id = f"test-timeout-{uuid4()}", f"test-timeout-{uuid4()}"
     async with Worker(client, task_queue=queue, workflows=[OperationWorkflow], activities=ACTIVITIES):
         result = await client.execute_workflow(OperationWorkflow.run, command["operation_id"],
-            id=workflow_id, task_queue=queue, execution_timeout=timedelta(minutes=15))
+            id=workflow_id, task_queue=queue, execution_timeout=timedelta(minutes=30))
     assert result["status"] == ("succeeded" if scenario == "recover" else "failed")
-    assert calls == [300] * expected_calls
+    assert calls == [600] * expected_calls
     if scenario == "timeout":
         assert result["error_code"] == "model_timeout" and "模型响应超时" in result["error_message"]
     async with factory() as db:
-        assert await db.get(Goal, command["resource_id"]) is not None
         assert (await db.get(Operation, command["operation_id"])).model_requests == expected_calls
-        plans = list(await db.scalars(select(Plan).where(Plan.goal_id == command["resource_id"])))
-        assert len(plans) == (1 if scenario == "recover" else 0)
+        if kind == "plan":
+            assert await db.get(Goal, command["resource_id"]) is not None
+            plans = list(await db.scalars(select(Plan).where(Plan.goal_id == command["resource_id"])))
+            assert len(plans) == (1 if scenario == "recover" else 0)
+        else:
+            messages = list(await db.scalars(select(Message).where(Message.conversation_id == conversation["id"])))
+            assert len([message for message in messages if message.role == "user"]) == 1
+            assert len([message for message in messages if message.role == "assistant"]) == (scenario == "recover")
     history = await client.get_workflow_handle(workflow_id).fetch_history()
     scheduled = [event.activity_task_scheduled_event_attributes for event in history.events
                  if event.HasField("activity_task_scheduled_event_attributes")]
     model_activity = next(item for item in scheduled if item.activity_type.name.endswith("__model_request"))
-    assert model_activity.start_to_close_timeout.seconds == 360
+    assert model_activity.start_to_close_timeout.seconds == 660
     assert model_activity.retry_policy.maximum_attempts == 2
-    assert history.events[0].workflow_execution_started_event_attributes.workflow_execution_timeout.seconds == 900
+    assert history.events[0].workflow_execution_started_event_attributes.workflow_execution_timeout.seconds == 1800
     await Replayer(workflows=[OperationWorkflow], plugins=[PydanticAIPlugin()]).replay_workflow(history)
     assert len(calls) == expected_calls
 
@@ -241,7 +255,11 @@ async def test_goal_cancel_stops_child_and_late_outbox_is_harmless(database, mon
         await deliver(client, {"kind": "temporal", "id": str(uuid4()), "payload": payload})
         await deliver(client, {"kind": "temporal", "id": str(uuid4()),
             "payload": {**payload, "type": "goal_cancelled"}})
-    await Replayer(workflows=[GoalWorkflow], plugins=[PydanticAIPlugin()]).replay_workflow(await handle.fetch_history())
+    history = await handle.fetch_history()
+    children = [event.start_child_workflow_execution_initiated_event_attributes for event in history.events
+                if event.HasField("start_child_workflow_execution_initiated_event_attributes")]
+    assert children[0].workflow_execution_timeout.seconds == 1800
+    await Replayer(workflows=[GoalWorkflow], plugins=[PydanticAIPlugin()]).replay_workflow(history)
 
 
 async def test_personal_chat_uses_durable_serial_inbox_without_creating_a_goal(database, monkeypatch):
@@ -309,7 +327,12 @@ async def test_personal_chat_uses_durable_serial_inbox_without_creating_a_goal(d
             assert len([m for m in messages if m.role == "assistant"]) == 2
         assert len(calls) == 2
         assert len(calls[1]) > len(calls[0])  # The canonical previous turn is continued.
-        await client.get_workflow_handle(f"assistant-{user.id}").cancel()
+        handle = client.get_workflow_handle(f"assistant-{user.id}")
+        history = await handle.fetch_history()
+        children = [event.start_child_workflow_execution_initiated_event_attributes for event in history.events
+                    if event.HasField("start_child_workflow_execution_initiated_event_attributes")]
+        assert len(children) == 2 and all(child.workflow_execution_timeout.seconds == 1800 for child in children)
+        await handle.cancel()
 
 
 async def test_chat_clarifies_then_drafts_and_only_confirmation_starts_planning(database, monkeypatch):

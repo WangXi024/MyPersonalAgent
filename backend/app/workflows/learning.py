@@ -119,7 +119,7 @@ class GoalWorkflow:
                         OperationWorkflow.run, command["operation_id"],
                         id=f"operation-{command['operation_id']}",
                         id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-                        execution_timeout=timedelta(minutes=15),
+                        execution_timeout=timedelta(minutes=30),
                     )
                     await self.current
                 except asyncio.CancelledError:
@@ -229,21 +229,24 @@ class AssistantWorkflow:
             self.operation_id = self.pending.pop(0)
             self.cancel_requested = False
             interrupted = False
+            error_code = "interrupted"
             try:
                 self.current = await workflow.start_child_workflow(OperationWorkflow.run, self.operation_id,
                     id=f"operation-{self.operation_id}", id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-                    execution_timeout=timedelta(minutes=15))
+                    execution_timeout=timedelta(minutes=30))
                 await self.current
             except asyncio.CancelledError:
                 if not self.cancel_requested:
                     raise
                 interrupted = True
-            except FailureError:
+            except FailureError as error:
                 interrupted = True
+                if isinstance(error.cause, TemporalTimeoutError):
+                    error_code = "operation_timeout"
             finally:
                 self.current = None
             if interrupted:
                 await workflow.execute_activity(activities.fail_operation, {"operation_id": self.operation_id,
-                    "code": "interrupted", "message": "本次回复已中断，可以重试。"}, **DB_OPTIONS)
+                    "code": error_code, "message": "本次回复已中断，可以重试。"}, **DB_OPTIONS)
         workflow.continue_as_new({"user_id": state["user_id"], "pending": self.pending,
                                   "seen": self.seen[-1000:]})

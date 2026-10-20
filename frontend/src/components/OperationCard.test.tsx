@@ -21,3 +21,13 @@ it('retains the generic failure label when an older error has no known timeout c
   expect(screen.getByText('暂时受阻')).toBeInTheDocument()
   expect(screen.queryByText('模型响应超时')).not.toBeInTheDocument()
 })
+
+it('shows the thirty-minute operation deadline on a failed chat', () => {
+  render(<OperationCard operation={{
+    id: 'deadline', goal_id: null, kind: 'tutor', status: 'failed', error_code: 'operation_timeout',
+    error_message: '本次处理已达到 30 分钟时限。已保存的内容仍然保留，可以重试。',
+    created_at: '2026-10-20T15:00:00Z',
+  }} />)
+  expect(screen.getByText('处理超时', { exact: true })).toBeInTheDocument()
+  expect(screen.getByText(/30 分钟时限/)).toBeInTheDocument()
+})

@@ -178,6 +178,43 @@ async def test_provider_error_body_cannot_enter_workflow_failure(monkeypatch, st
     assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
+@pytest.mark.parametrize("transport_error,expected_type", [
+    ("ReadTimeout", "ProviderTimeout"), ("ConnectError", "ProviderRequestFailed"),
+])
+async def test_sdk_wrapped_transport_errors_are_classified_without_exposing_payloads(
+    monkeypatch, transport_error, expected_type,
+):
+    import httpx2
+    from openai import AsyncOpenAI
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+    from temporalio.exceptions import ApplicationError
+
+    from app.agents.budgeted_model import BudgetedModel
+    from app.domain import execution
+
+    async def reserve(operation_id, limit):
+        return {"model_alias": "test-model"}
+
+    async def handler(request):
+        raise getattr(httpx2, transport_error)("private-provider-payload", request=request)
+
+    monkeypatch.setattr(execution, "reserve_model_request", reserve)
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as transport:
+        async with AsyncOpenAI(base_url="https://local-test.invalid/v1", api_key="test-only",
+                               max_retries=0, http_client=transport) as client:
+            model = BudgetedModel(OpenAIChatModel("test-model", provider=OpenAIProvider(openai_client=client)))
+            with pytest.raises(ApplicationError) as caught:
+                await model.request([ModelRequest(parts=[UserPromptPart("本地测试")])],
+                    {"learning_operation_id": "test-operation", "timeout": 0.01}, ModelRequestParameters())
+    assert caught.value.type == expected_type
+    assert caught.value.non_retryable is False
+    assert "private-provider-payload" not in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
 async def test_timeout_message_is_safe_and_does_not_relabel_other_errors(database):
     from temporalio.exceptions import ActivityError, ApplicationError, TimeoutError, TimeoutType
 
@@ -200,3 +237,37 @@ async def test_timeout_message_is_safe_and_does_not_relabel_other_errors(databas
     assert result["error_code"] == "model_timeout"
     assert "模型响应超时" in result["error_message"] and "private" not in result["error_message"]
     assert (await execution.mark_failed(command["operation_id"], "agent_failed", "other")) == result
+
+
+async def test_chat_operation_deadline_has_a_clear_safe_message(database, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from temporalio import workflow
+    from temporalio.exceptions import ChildWorkflowError, TimeoutError, TimeoutType
+
+    from app.api.routes import assistant_conversation
+    from app.domain import commands, execution
+    from app.workflows.learning import AssistantWorkflow
+
+    _, user, _ = database
+    conversation = await assistant_conversation(user)
+    command = await commands.send_message(user.id, conversation["id"], {"content": "保留这条消息"}, "deadline-test")
+    error = ChildWorkflowError("private-child-error", namespace="test", workflow_id="test", run_id="test",
+                               workflow_type="OperationWorkflow", initiated_event_id=1, started_event_id=2,
+                               retry_state=None)
+    error.__cause__ = TimeoutError("private-timeout", type=TimeoutType.START_TO_CLOSE, last_heartbeat_details=[])
+    start_child = AsyncMock(side_effect=error)
+    supervisor = AssistantWorkflow()
+
+    async def fail_operation(activity, data, **kwargs):
+        result = await execution.mark_failed(data["operation_id"], data["code"], data["message"])
+        assert result["error_code"] == "operation_timeout"
+        assert "30 分钟" in result["error_message"] and "private" not in result["error_message"]
+        raise StopAsyncIteration
+
+    monkeypatch.setattr(workflow, "start_child_workflow", start_child)
+    monkeypatch.setattr(workflow, "wait_condition", AsyncMock())
+    monkeypatch.setattr(workflow, "execute_activity", fail_operation)
+    with pytest.raises(StopAsyncIteration):
+        await supervisor.run({"user_id": user.id, "pending": [command["operation_id"]]})
+    assert start_child.call_args.kwargs["execution_timeout"].total_seconds() == 1800

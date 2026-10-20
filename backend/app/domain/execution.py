@@ -393,7 +393,7 @@ async def mark_failed(operation_id: str, code: str, message: str) -> dict:
             # Never surface provider exception strings or arbitrary secrets.
             messages = {
                 "model_timeout": "模型响应超时，未能完成本次处理。已保存的内容仍然保留，可以重试。",
-                "operation_timeout": "本次处理已达到 15 分钟时限。已保存的内容仍然保留，可以重试。",
+                "operation_timeout": "本次处理已达到 30 分钟时限。已保存的内容仍然保留，可以重试。",
             }
             op.error_code = code[:60]
             op.error_message = messages.get(code, "处理未完成，已保存原始内容，可以重试。")

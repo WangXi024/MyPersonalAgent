@@ -67,7 +67,7 @@ class ModelGateway:
                 "model_name": alias,
                 "litellm_params": {
                     "model": "openai/" + values["model_id"], "api_base": values["api_base"],
-                    "litellm_credential_name": credential_name, "timeout": 90, "max_retries": 0,
+                    "litellm_credential_name": credential_name, "timeout": 630, "max_retries": 0,
                 },
                 "model_info": {
                     "id": deployment_id, "mode": "chat", "access_groups": ["learning-configured"],
