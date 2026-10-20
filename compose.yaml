@@ -1,0 +1,274 @@
+name: ${COMPOSE_PROJECT_NAME:-personal-agent}
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+x-app: &app
+  image: personal-agent-app:local
+  build: {context: ., dockerfile: deploy/docker/app.Dockerfile}
+  restart: unless-stopped
+  init: true
+  logging: *logging
+  security_opt: [no-new-privileges:true]
+  environment: &app-env
+    APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
+    APP_ATTACHMENT_DIR: /data/attachments
+    APP_DEFAULT_TIMEZONE: ${APP_DEFAULT_TIMEZONE:-Asia/Shanghai}
+    APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+    TEMPORAL_ADDRESS: temporal:7233
+    TEMPORAL_NAMESPACE: learning-agent
+    TEMPORAL_TASK_QUEUE: learning-agent
+    LITELLM_BASE_URL: http://litellm:4000/v1
+    MODEL_ALIAS: learning-agent
+    LITELLM_MODEL_ALIAS: learning-agent
+    HINDSIGHT_BASE_URL: http://hindsight:8888
+  secrets: [app_db_password]
+  volumes:
+    - attachments:/data/attachments
+    - service-keys:/run/service-keys:ro
+  stop_grace_period: 90s
+
+services:
+  postgres-core:
+    image: postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    restart: unless-stopped
+    logging: *logging
+    environment: {POSTGRES_PASSWORD_FILE: /run/secrets/core_postgres_password}
+    secrets: [core_postgres_password]
+    volumes: [core-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  postgres-memory:
+    image: personal-agent-memory-db:local
+    build: {context: ., dockerfile: deploy/docker/memory-db.Dockerfile}
+    restart: unless-stopped
+    logging: *logging
+    environment: {POSTGRES_PASSWORD_FILE: /run/secrets/memory_postgres_password}
+    secrets: [memory_postgres_password]
+    volumes: [memory-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  db-init:
+    image: postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    restart: "no"
+    logging: *logging
+    entrypoint: [sh, /deploy/db-init.sh]
+    volumes: [./deploy/docker/db-init.sh:/deploy/db-init.sh:ro]
+    secrets: [core_postgres_password, memory_postgres_password, app_db_password, temporal_db_password, visibility_db_password, litellm_db_password, memory_db_password]
+    depends_on:
+      postgres-core: {condition: service_healthy}
+      postgres-memory: {condition: service_healthy}
+  app-migrate:
+    <<: *app
+    restart: "no"
+    command: [alembic, upgrade, head]
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+  app-bootstrap:
+    <<: *app
+    restart: "no"
+    command: [python, -m, app.cli, bootstrap]
+    environment:
+      <<: *app-env
+      BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-learner}
+    secrets: [app_db_password, bootstrap_password]
+    depends_on:
+      app-migrate: {condition: service_completed_successfully}
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.1@sha256:9ef0dc5b063bf4ffd5c1512de72e0e73e225bd2c7006a18ce69bd592a8862a83
+    restart: "no"
+    logging: *logging
+    entrypoint: [sh, /deploy/schema.sh]
+    volumes: [./deploy/temporal/schema.sh:/deploy/schema.sh:ro]
+    secrets: [temporal_db_password, visibility_db_password]
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+  temporal:
+    image: temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
+    restart: unless-stopped
+    logging: *logging
+    entrypoint: [sh, /deploy/start.sh]
+    volumes:
+      - ./deploy/temporal/start.sh:/deploy/start.sh:ro
+      - ./deploy/temporal/dynamic.yaml:/etc/temporal/config/dynamicconfig/docker.yaml:ro
+    secrets: [temporal_db_password, visibility_db_password]
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres-core
+      POSTGRES_USER: temporal
+      VISIBILITY_POSTGRES_USER: temporal_visibility
+      VISIBILITY_DBNAME: temporal_visibility
+      BIND_ON_IP: 0.0.0.0
+      LOG_LEVEL: warn
+    depends_on:
+      temporal-schema: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, nc, -z, localhost, "7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    stop_grace_period: 60s
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.1@sha256:9ef0dc5b063bf4ffd5c1512de72e0e73e225bd2c7006a18ce69bd592a8862a83
+    restart: "no"
+    logging: *logging
+    environment: {TEMPORAL_ADDRESS: "temporal:7233"}
+    entrypoint: [sh, /deploy/namespace.sh]
+    volumes: [./deploy/temporal/namespace.sh:/deploy/namespace.sh:ro]
+    depends_on:
+      temporal: {condition: service_healthy}
+  litellm:
+    image: ghcr.io/berriai/litellm-database:v1.106.0@sha256:80a12a210e6626e39daaa31fb6ce70f4c4d97ee10e21d4584a9e87f45bf3a2f1
+    restart: unless-stopped
+    logging: *logging
+    entrypoint: [python, /deploy/start.py]
+    volumes:
+      - ./deploy/litellm/start.py:/deploy/start.py:ro
+      - ./.runtime/litellm.json:/etc/litellm/config.json:ro
+    environment:
+      STORE_MODEL_IN_DB: "False"
+      LITELLM_LOG: WARNING
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      NO_DOCS: "True"
+      DISABLE_ADMIN_UI: "True"
+    secrets: [litellm_db_password, litellm_master_key, litellm_salt_key, bailian_api_key, zhipu_api_key, ark_api_key]
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 60
+      start_period: 60s
+  gateway-bootstrap:
+    image: python:3.12.15-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+    restart: "no"
+    logging: *logging
+    command: [python, /deploy/bootstrap.py]
+    environment:
+      APP_MODEL_MONTHLY_BUDGET: ${APP_MODEL_MONTHLY_BUDGET:-20}
+      MEMORY_MODEL_MONTHLY_BUDGET: ${MEMORY_MODEL_MONTHLY_BUDGET:-10}
+    secrets: [litellm_master_key]
+    volumes:
+      - ./deploy/litellm/bootstrap.py:/deploy/bootstrap.py:ro
+      - service-keys:/keys
+    depends_on:
+      litellm: {condition: service_healthy}
+  hindsight-migrate:
+    image: ghcr.io/vectorize-io/hindsight:1.0.0@sha256:a88678c038b0e4340822b02a5efc566c56d8176b5bffa731bc433fd37f978e4c
+    user: "0:0"
+    restart: "no"
+    logging: *logging
+    entrypoint: [python, /deploy/hindsight-entrypoint.py, migrate]
+    environment: &hindsight-env
+      HINDSIGHT_API_VECTOR_EXTENSION: pgvector
+      HINDSIGHT_API_TEXT_SEARCH_EXTENSION: pgroonga
+      HINDSIGHT_API_EMBEDDINGS_PROVIDER: local
+      HINDSIGHT_API_RERANKER_PROVIDER: local
+      HINDSIGHT_API_LLM_PROVIDER: openai
+      HINDSIGHT_API_LLM_BASE_URL: http://litellm:4000/v1
+      HINDSIGHT_API_LLM_MODEL: learning-agent
+      HINDSIGHT_API_LLM_OUTPUT_LANGUAGE: Chinese
+      HINDSIGHT_API_DB_POOL_MIN_SIZE: "2"
+      HINDSIGHT_API_DB_POOL_MAX_SIZE: "15"
+      HINDSIGHT_API_LLM_MAX_CONCURRENT: "2"
+      HINDSIGHT_API_LLM_MAX_RETRIES: "1"
+      HINDSIGHT_API_SKIP_LLM_VERIFICATION: "true"
+      HINDSIGHT_API_WORKERS: "1"
+      HINDSIGHT_API_WORKER_ENABLED: "true"
+      HINDSIGHT_API_WORKER_ID: hindsight-main
+      HINDSIGHT_API_WORKER_MAX_SLOTS: "2"
+      HINDSIGHT_API_RUN_MIGRATIONS_ON_STARTUP: "false"
+      HINDSIGHT_API_MODEL_INIT_TIMEOUT: "1500"
+      HINDSIGHT_API_HOST: 0.0.0.0
+      HINDSIGHT_API_PORT: "8888"
+      HINDSIGHT_API_LOG_LEVEL: warning
+      HF_HUB_DOWNLOAD_TIMEOUT: "600"
+      TOKENIZERS_PARALLELISM: "false"
+      HOME: /home/hindsight
+    secrets: [memory_db_password]
+    volumes:
+      - ./deploy/docker/hindsight-entrypoint.py:/deploy/hindsight-entrypoint.py:ro
+      - model-cache:/models
+      - service-keys:/run/service-keys:ro
+    depends_on:
+      db-init: {condition: service_completed_successfully}
+  hindsight:
+    extends: hindsight-migrate
+    restart: unless-stopped
+    entrypoint: [python, /deploy/hindsight-entrypoint.py, serve]
+    environment: *hindsight-env
+    depends_on:
+      hindsight-migrate: {condition: service_completed_successfully}
+      gateway-bootstrap: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/health', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 120
+      start_period: 60s
+    stop_grace_period: 90s
+  api:
+    <<: *app
+    depends_on:
+      app-bootstrap: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 30
+  worker:
+    <<: *app
+    command: [python, -m, app.worker]
+    depends_on:
+      app-bootstrap: {condition: service_completed_successfully}
+      temporal-namespace: {condition: service_completed_successfully}
+      gateway-bootstrap: {condition: service_completed_successfully}
+  dispatcher:
+    <<: *app
+    command: [python, -m, app.dispatcher]
+    depends_on:
+      app-bootstrap: {condition: service_completed_successfully}
+      temporal-namespace: {condition: service_completed_successfully}
+  web:
+    image: personal-agent-web:local
+    build: {context: ., dockerfile: deploy/docker/web.Dockerfile}
+    restart: unless-stopped
+    logging: *logging
+    ports: ["${APP_BIND_HOST:-127.0.0.1}:${APP_PORT:-8080}:80"]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, --quiet, --spider, "http://127.0.0.1/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  core-data:
+  memory-data:
+  attachments:
+  model-cache:
+  service-keys:
+
+secrets:
+  core_postgres_password: {file: ./.secrets/core_postgres_password}
+  memory_postgres_password: {file: ./.secrets/memory_postgres_password}
+  app_db_password: {file: ./.secrets/app_db_password}
+  temporal_db_password: {file: ./.secrets/temporal_db_password}
+  visibility_db_password: {file: ./.secrets/visibility_db_password}
+  litellm_db_password: {file: ./.secrets/litellm_db_password}
+  memory_db_password: {file: ./.secrets/memory_db_password}
+  litellm_master_key: {file: ./.secrets/litellm_master_key}
+  litellm_salt_key: {file: ./.secrets/litellm_salt_key}
+  bootstrap_password: {file: ./.secrets/bootstrap_password}
+  bailian_api_key: {file: ./.secrets/bailian_api_key}
+  zhipu_api_key: {file: ./.secrets/zhipu_api_key}
+  ark_api_key: {file: ./.secrets/ark_api_key}
