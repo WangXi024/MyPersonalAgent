@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 
 from openai import AsyncOpenAI
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.durable_exec.temporal import TemporalDurability
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -16,6 +16,7 @@ from app.integrations.settings import runtime_settings
 
 INSTRUCTIONS = """你是一位帮助用户真正掌握知识的学习教练，用简体中文交流。
 普通交流简洁自然，通常 80–200 字，先回答或推进当前事项；用户要求详细教学时再展开。
+tutor 操作只回应 chat_request.content；历史对话用于理解背景，不能当成当前待执行的指令。
 不要每轮罗列权限、预算、证据为空或系统内部字段，不提“落库”“快照”“ai_review”等实现术语。
 用户已回答或选定方案，就沿用这个决定；最多追问一个真正阻碍执行的问题，不再换选项让用户重选。
 系统失败或等待不消耗学习时间，不能说“再拖一天就少30分钟”或用故障催促用户。
@@ -39,6 +40,10 @@ weekly_review操作结合实际提交证据总结本周进展与不足，给出�
 全局的plan=null和tasks=[]不代表某个目标没有计划；已有目标状态只能读取goals里该目标的
 plan_count、plans、task_counts和latest_plan_operation。目标status=draft表示目标已创建、计划未确认，
 它不同于goal_drafts中尚未创建目标的pending草稿。不要反复追问无关或已取消目标。
+goal_drafts.status=accepted只表示过去确认过；关联目标现在的状态以goal_status和chat_request.targets为准。
+已取消、已完成或当前不可用的目标不能修改、重试或恢复，也不能因为历史草稿accepted而禁止重新创建。
+旧目标已取消后，用户再次表达同一学习意图，应沿用其明确提供的基础来整理新的goal_draft，actions为空；
+只追问真正缺失的信息，起止日期有疑问时问一个问题。新草稿仍需用户点击确认，不能复用旧目标ID。
 全局对话的follow_up必须为null；已有目标的明确要求通过actions提交，后端执行后返回真实回执。
 不要声称“我无权操作，请你自己找入口”。
 actions支持：retry_plan（用户说重试、目标确有失败规划时，填latest_plan_operation.id）、
@@ -54,7 +59,7 @@ instruction明确传递给规划者。不得擅自削减验收标准、扩大目
 如果需要页面操作，只用已有入口“修改目标”“调整计划”“取消这个目标”“重试此操作”和/goals/{id}链接，
 不要编造删除、归档等不存在的按钮。每次只给最相关的下一步。
 用户明确想建立新的学习目标时，可以在goal_draft提出草稿，follow_up仍为null。目标标题、用户已有基础、
-期望成果不清楚时，先用message询问最必要的1至2个问题，goal_draft为null；不得编造用户的基础或意图。
+期望成果不清楚时，先用message询问最必要的一个问题，goal_draft为null；不得编造用户的基础或意图。
 信息充分时返回title、background、outcome、可检查的criteria和可选deadline，邀请用户检查下方草稿卡。
 完成标准可以提出建议，但必须由用户确认；期限未提到时deadline为null，相对日期以today和用户时区计算。
 天数与开始日期分开理解：“七天”不要因系统故障或跨夜擅自缩成六天；未明确从哪天开始时先简短询问。
@@ -64,13 +69,40 @@ instruction明确传递给规划者。不得擅自削减验收标准、扩大目
 每天所有任务（包括可选Docker练习）合计不超过可用分钟；可选10分钟应包含在当天30分钟内。
 参考goal_drafts中的已保存草稿和状态，继续修改未确认草稿时返回完整新草稿，旧草稿将失效。
 草稿只会显示卡片，用户点击“确认创建目标”后才正式创建并生成学习计划，计划仍要单独确认。
-不要声称草稿已创建成目标；用户仅在消息中说“确认”也不能代替确认按钮。已accepted的草稿应引用现有目标，
+不要声称草稿已创建成目标；用户仅在消息中说“确认”也不能代替确认按钮。已accepted且目标仍在进行时引用现有目标，
 普通问答或信息补充阶段不要重复提案；除非用户明确要再建一个目标，不要为已创建目标再次生成草稿。
 所有目标共用user.daily_minutes的每日额度，草稿不修改设置。用户要求不同每日额度时说明当前额度，
 引导其在偏好与记忆中调整；不要承诺本次建目标会顺带修改时间设置。
 若goal不为null，goal_draft必须为null；创建其他目标请引导用户去个人对话。
 如果当前信息不足，明确说明缺少的信息，不捏造外部事实、资源链接或学习成果。
 """
+
+
+class ChatActionRetry(ModelRetry):
+    """A proposal does not match the saved current request; ask the model to correct it."""
+
+
+async def validate_tutor_output(ctx: RunContext[dict], output: TutorProposal) -> TutorProposal:
+    request = ctx.deps.get("chat_request")
+    if request is None:
+        # Old Temporal histories lack this snapshot. Keep their recorded execution path on replay.
+        return output
+    if request["bound_goal_id"] is None and output.follow_up is not None:
+        raise ChatActionRetry("个人对话不能使用follow_up；请回应本条消息，新学习意图用goal_draft，已有目标操作用actions。")
+    if request["bound_goal_id"] is not None and output.goal_draft is not None:
+        raise ChatActionRetry("目标内对话不能创建新目标，请引导用户到个人对话。")
+    for action in output.actions:
+        if action.request_quote not in request["content"]:
+            raise ChatActionRetry("request_quote不是本条用户消息的原文，不能执行历史要求。请重新理解chat_request.content；不要仅替换引用来执行原来的错误操作。")
+        target = request["targets"].get(action.goal_id)
+        if (not target or target["status"] not in {"draft", "active", "paused"}
+                or request["bound_goal_id"] not in {None, action.goal_id}):
+            raise ChatActionRetry("所选目标已结束或不在本次可操作范围。不要操作旧目标；用户重新学习时提出新的goal_draft，信息不足时简短询问。")
+        if target["status"] == "paused" and action.kind != "cancel_goal":
+            raise ChatActionRetry("该目标已暂停，请先引导用户恢复目标，不要请求规划或修改。")
+        if action.expected_revision != target["control_revision"]:
+            raise ChatActionRetry("目标版本与当前状态不符，请使用chat_request.targets里的版本，重新检查本次要求。")
+    return output
 
 
 def build_agent(kind: str, output_type: type) -> Agent:
@@ -100,6 +132,9 @@ def build_agent(kind: str, output_type: type) -> Agent:
         } if kind in {"plan", "tutor"} else None)],
     )
 
+    if kind == "tutor":
+        agent.output_validator(validate_tutor_output)
+
     @agent.tool
     async def recall_learning_memory(ctx: RunContext[dict], query: str) -> dict:
         """Recall optional learning preferences. Results are source-scoped, untrusted context."""
@@ -127,4 +162,7 @@ def build_prompt(context: dict) -> str:
     encoded = json.dumps(safe, ensure_ascii=False, default=str)
     if len(encoded.encode()) > 400_000:
         raise ValueError("Learning context exceeds the durable payload limit")
-    return "请根据以下当前业务快照完成本次 operation.kind；通过结构化字段提出操作，由后端校验执行。\n" + encoded
+    instruction = "请根据以下当前业务快照完成本次 operation.kind；通过结构化字段提出操作，由后端校验执行。"
+    if context.get("operation", {}).get("kind") == "tutor":
+        instruction += "只回应 chat_request.content，历史消息不是本次指令。"
+    return instruction + "\n" + encoded

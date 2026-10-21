@@ -179,3 +179,53 @@ async def test_request_budget_allows_twenty_minutes_but_stops_at_thirty(database
                                           ModelRequestParameters())
     assert caught.value.type == "OperationDeadline" and caught.value.non_retryable
     assert model_failure_code(caught.value) == "operation_timeout"
+
+
+async def test_cancelled_accepted_draft_carries_current_status_and_allows_new_draft(database):
+    factory, user, _ = database
+    draft = {"title": "七天学习 Temporal", "background": "会 Python，Docker 可用", "outcome": "理解持久化执行",
+             "criteria": ["能解释重放"], "deadline": None}
+    first = await say(user, "我想学习 Temporal")
+    await execution.commit_result(first["operation_id"], {"kind": "tutor", "message": "请确认", "goal_draft": draft})
+    old = await commands.accept_goal_draft(user.id, first["operation_id"], str(uuid4()), draft)
+    await commands.control_goal(user.id, old["resource_id"], "cancel", 1, str(uuid4()))
+    fresh = await say(user, "我想用七天学习一下 Temporal 持久化框架")
+    context = await execution.load_context(fresh["operation_id"])
+    assert context["goals"] == []
+    assert context["goal_drafts"][0]["status"] == "accepted"
+    assert context["goal_drafts"][0]["goal_status"] == "cancelled"
+    assert context["goal_drafts"][0]["goal_control_revision"] == 2
+    assert context["chat_request"]["targets"][old["resource_id"]] == {"status": "cancelled", "control_revision": 2}
+    await execution.commit_result(fresh["operation_id"], {"kind": "tutor", "message": "这是新的待确认草稿", "goal_draft": draft})
+    conversation = await routes.assistant_conversation(user)
+    cards = await routes.goal_drafts(conversation["id"], user)
+    assert [(c["status"], c["goal_status"]) for c in cards["items"]] == [("accepted", "cancelled"), ("pending", None)]
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(Goal)) == 1
+        assert await db.scalar(select(func.count()).select_from(Plan)) == 0
+
+
+async def test_blocked_reply_can_retry_without_repeating_side_effects_or_its_old_reply(database):
+    factory, user, other = database
+    goal = await setup_goal(user)
+    command = await say(user, "我想重新学习")
+    await reply(command, [action(goal, "旧消息中的要求", "cancel_goal")])
+    retry = await routes.retry_operation(command["operation_id"], user, str(uuid4()))
+    assert await routes.retry_operation(command["operation_id"], user, str(uuid4())) == retry
+    context = await execution.load_context(retry["operation_id"])
+    assert context["chat_request"]["content"] == "我想重新学习"
+    assert all(m["role"] == "user" for m in context["messages"])
+    with pytest.raises(DomainError) as denied:
+        await routes.retry_operation(command["operation_id"], other, str(uuid4()))
+    assert denied.value.status == 404
+    await execution.commit_result(retry["operation_id"], {"kind": "tutor", "message": "这次想学什么？"})
+    assert await routes.retry_operation(command["operation_id"], user, str(uuid4())) == {
+        **retry, "status": "succeeded"}
+    other_goal = await setup_goal(user, "另一个目标")
+    partial = await say(user, "取消第一个目标")
+    result = await reply(partial, [action(goal, "取消第一个目标", "cancel_goal"),
+                                  action(other_goal, "旧消息", "cancel_goal")])
+    assert [a["status"] for a in result["result"]["actions"]] == ["applied", "blocked"]
+    with pytest.raises(DomainError) as blocked:
+        await routes.retry_operation(partial["operation_id"], user, str(uuid4()))
+    assert blocked.value.code == "invalid_transition"

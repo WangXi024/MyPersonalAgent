@@ -93,6 +93,11 @@ async def goal_draft_items(db, conversation, limit=30):
         .order_by(Message.seq.desc())
         .limit(limit)
     )
+    operations = list(operations)
+    linked_goals = {goal.id: goal for goal in await db.scalars(select(Goal).where(
+        Goal.user_id == conversation.user_id,
+        Goal.id.in_([op.result.get("goal_id") for op in operations if op.result.get("goal_id")]),
+    ))}
     return list(
         reversed(
             [
@@ -102,6 +107,10 @@ async def goal_draft_items(db, conversation, limit=30):
                     "status": op.result["goal_draft_status"],
                     "draft": op.result["goal_draft"],
                     "goal_id": op.result.get("goal_id"),
+                    "goal_status": linked_goals[op.result["goal_id"]].status
+                    if op.result.get("goal_id") in linked_goals else None,
+                    "goal_control_revision": linked_goals[op.result["goal_id"]].control_revision
+                    if op.result.get("goal_id") in linked_goals else None,
                     "plan_operation_id": op.result.get("plan_operation_id"),
                 }
                 for op in operations

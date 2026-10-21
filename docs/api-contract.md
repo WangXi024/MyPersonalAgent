@@ -55,6 +55,10 @@ Tutor output may contain up to three `actions`, with at most one action per goal
 
 Under the user transaction lock, the backend checks ownership, goal scope, revision, quoted request, and allowed state before executing each command. The same goal-edit/cancel rules apply as in the UI. Failed checks produce a blocked receipt rather than a claimed success. A repeated retry reuses the current planning operation when one is already underway. Stable per-source keys and terminal-result checks prevent duplicate commits after activity retries.
 
+New tutor contexts include `chat_request: {content, bound_goal_id, targets}`; each target carries its current `status` and `control_revision`. Before committing, an output validator asks the model to correct actions quoting another message, targeting an ended/out-of-scope goal, or using a stale revision. This uses the existing output retry/request budget. Exhausted action corrections fail with `invalid_chat_action` and publish no misleading assistant reply. Transaction checks still guard state changes after the context snapshot. Old recorded contexts without `chat_request` retain their replay path.
+
+For historical tutor replies where every action was blocked, `/operations/{id}/retry` also accepts a `succeeded` source. It retries the saved user message manually, excludes that turn's previous assistant reply, and records `retry_of_operation_id`. Repeated requests reuse an accepted/running/succeeded retry; mixed applied/blocked replies cannot be retried this way. The frontend offers “重新处理这条消息” without automatically sending a model request.
+
 Assistant messages now include `actions: [{kind, status: "applied" | "blocked", goal_id, goal_title, operation_id, message, changes?}]`, loaded from their saved operation result. Receipts link to the actual plan operation; SSE refreshes its status. The accepted goal card uses current saved goal fields and the latest plan operation, and offers a direct retry when planning failed.
 
 Global context includes the latest ten unfinished goals with their saved requirements, revisions, plan/task counts, recent plan summaries and latest planning operation. A global `plan: null` is not evidence that those goals lack plans. Tutor history contains only bounded public turns from its own conversation, excluding future user turns and previous internal snapshots. Planning receives the latest saved goal fields plus the source chat request and recent public context. No schema migration is required.
@@ -82,16 +86,18 @@ The draft is saved in the completed tutor operation's result JSON. Its operation
         "deadline": null
       },
       "goal_id": null,
+      "goal_status": null,
+      "goal_control_revision": null,
       "plan_operation_id": null
     }
   ]
 }
 ```
 
-The endpoint checks conversation ownership and returns the most recent 30 draft cards in message order. Status is `pending`, `accepted`, or `superseded`; goal conversations return an empty array. Accepted cards return the user's confirmed, edited draft and the created goal/plan-operation identifiers.
+The endpoint checks conversation ownership and returns the most recent 30 draft cards in message order. Status is `pending`, `accepted`, or `superseded`; goal conversations return an empty array. Accepted cards return the user's confirmed, edited draft and the created goal/plan-operation identifiers, plus the linked goal's current `goal_status` and `goal_control_revision` (null if unavailable). Historical acceptance does not mean the goal remains active: cancelled cards and action receipts are marked as history, and a new learning intent may produce a new pending draft without restoring the old goal.
 
 `POST /goal-drafts/{operation_id}/accept` accepts the full edited draft object with the same validation above, the usual CSRF protection, and an `Idempotency-Key`. It returns HTTP 202 `{operation_id, status, resource_id}` where `operation_id` is the new plan operation and `resource_id` is the Goal ID. Confirmation atomically creates the Goal in `draft` state, its conversation, the plan operation and its outbox entry. Generated plans still require the existing plan confirmation step before activation.
 
 The original tutor operation remains global and completed. Same-content confirmation retries with either the same or a fresh key return the original acceptance response and cannot create a second goal. Each request key is recorded as a completed control operation; it cannot be reused for another command. The plan operation uses a stable key derived from the draft operation. A different confirmation payload after acceptance returns HTTP 409 `goal_draft_conflict`; an obsolete draft returns HTTP 409 `goal_draft_superseded`; invalid fields return 422; another user's draft returns 404.
 
-SSE business events `goal_draft.proposed`, `goal_draft.superseded`, and `goal_draft.accepted` prompt the frontend to refresh cards. Ordinary goal, operation and message events continue unchanged. `load_context.goal_drafts` supplies the global Agent with the latest 10 draft status summaries (`operation_id`, `status`, `title`, `goal_id`, `plan_operation_id`) so a historical proposal cannot be mistaken for a confirmed goal. No database migration is needed for drafts.
+SSE business events `goal_draft.proposed`, `goal_draft.superseded`, and `goal_draft.accepted` prompt the frontend to refresh cards. Ordinary goal, operation and message events continue unchanged. `load_context.goal_drafts` supplies the global Agent with the latest 10 draft status summaries (`operation_id`, `status`, `title`, `goal_id`, `goal_status`, `goal_control_revision`, `plan_operation_id`) so historical acceptance is distinguished from current goal state. No database migration is needed for drafts.

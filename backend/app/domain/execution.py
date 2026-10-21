@@ -184,7 +184,7 @@ async def load_context(operation_id: str) -> dict:
                                 Message.seq <= op.payload.get("message_seq", conversation.last_seq),
                                 and_(Message.role == "assistant", Operation.created_at < op.created_at,
                                      Operation.payload["message_seq"].as_integer()
-                                     <= op.payload.get("message_seq", conversation.last_seq)),
+                                     < op.payload.get("message_seq", conversation.last_seq)),
                             ),
                         )
                         .order_by(Message.seq.desc())
@@ -330,6 +330,8 @@ async def load_context(operation_id: str) -> dict:
                     "status": item["status"],
                     "title": item["draft"]["title"],
                     "goal_id": item["goal_id"],
+                    "goal_status": item["goal_status"],
+                    "goal_control_revision": item["goal_control_revision"],
                     "plan_operation_id": item["plan_operation_id"],
                 }
                 for item in await goal_draft_items(db, conversation, limit=10)
@@ -366,20 +368,25 @@ async def load_context(operation_id: str) -> dict:
             for field in ("title", "background", "outcome", "criteria", "deadline"):
                 if field in model_payload:
                     model_payload[field] = current_goal[field]
+        goals = [await goal_overview(db, item) for item in await db.scalars(
+            select(Goal).where(Goal.user_id == user.id, Goal.status.notin_(["cancelled", "completed"]))
+            .order_by(Goal.created_at.desc()).limit(10)
+        )] if goal is None else []
+        targets = {item["goal_id"]: {"status": item["goal_status"],
+                                    "control_revision": item["goal_control_revision"]}
+                   for item in draft_states if item["goal_id"]}
+        targets.update({item["id"]: {"status": item["status"], "control_revision": item["control_revision"]}
+                        for item in goals})
+        if goal:
+            targets[goal.id] = {"status": goal.status, "control_revision": goal.control_revision}
         return {
             "operation": {**public_operation(op), "payload": model_payload, "versions": op.versions},
             "user": public_user(user),
             "goal": serialize(goal) if goal else None,
             "goal_drafts": draft_states,
-            "goals": [
-                await goal_overview(db, item)
-                for item in await db.scalars(
-                    select(Goal).where(Goal.user_id == user.id, Goal.status.notin_(["cancelled", "completed"]))
-                    .order_by(Goal.created_at.desc()).limit(10)
-                )
-            ]
-            if goal is None
-            else [],
+            "goals": goals,
+            "chat_request": {"content": op.payload.get("content", ""), "bound_goal_id": op.goal_id,
+                             "targets": targets} if op.kind == "tutor" else None,
             "plan": plan_data,
             "tasks": task_data,
             "submission": serialize(submission) if submission else None,
@@ -440,6 +447,7 @@ async def mark_failed(operation_id: str, code: str, message: str) -> dict:
             messages = {
                 "model_timeout": "模型响应超时，未能完成本次处理。已保存的内容仍然保留，可以重试。",
                 "operation_timeout": "本次处理已达到 30 分钟时限。已保存的内容仍然保留，可以重试。",
+                "invalid_chat_action": "Agent 未能正确处理你这条消息，未执行目标修改。消息已保留，可以重试。",
             }
             op.error_code = code[:60]
             op.error_message = messages.get(code, "处理未完成，已保存原始内容，可以重试。")

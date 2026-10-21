@@ -27,4 +27,4 @@ export interface GoalDetail { goal: Goal; plans: Plan[]; milestones: Milestone[]
 export interface Accepted { operation_id: string; status: string; resource_id?: string }
 export interface MessagesResponse { items: Message[]; read_seq: number; last_seq: number; has_more: boolean }
 export interface GoalInput { title: string; background: string; outcome: string; criteria: string[]; deadline: string | null }
-export interface GoalDraft { operation_id: string; message_id: string; status: 'pending' | 'accepted' | 'superseded'; draft: GoalInput; goal_id: string | null; plan_operation_id: string | null }
+export interface GoalDraft { operation_id: string; message_id: string; status: 'pending' | 'accepted' | 'superseded'; draft: GoalInput; goal_id: string | null; goal_status?: Goal['status'] | null; goal_control_revision?: number | null; plan_operation_id: string | null }

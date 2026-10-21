@@ -538,7 +538,10 @@ async def retry_operation(operation_id: str, user=Depends(current_user), request
     async with SessionFactory() as db, db.begin():
         current, stream = await lock_user(db, user.id)
         op = await owned(db, Operation, operation_id, user.id)
-        if op.status not in {"failed", "superseded"} or op.kind not in {
+        actions = op.result.get("actions", [])
+        blocked_tutor = (op.kind == "tutor" and op.status == "succeeded" and bool(actions)
+                         and all(item.get("status") == "blocked" for item in actions))
+        if (op.status not in {"failed", "superseded"} and not blocked_tutor) or op.kind not in {
             "plan",
             "tutor",
             "assessment",
@@ -553,8 +556,16 @@ async def retry_operation(operation_id: str, user=Depends(current_user), request
             )
         ) or (goal is None and op.kind != "tutor"):
             raise DomainError("goal_inactive", "请先恢复目标")
+        if blocked_tutor:
+            latest = await db.scalar(select(Operation).where(
+                Operation.user_id == user.id, Operation.kind == "tutor",
+                Operation.payload["retry_of_operation_id"].as_string() == op.id,
+            ).order_by(Operation.created_at.desc()).limit(1))
+            if latest and latest.status in {"accepted", "running", "succeeded"}:
+                return commands.accepted(latest)
+        payload = {**op.payload, "retry_of_operation_id": op.id} if blocked_tutor else op.payload
         new, created = await new_operation(
-            db, current, stream, request_key, op.kind, op.payload, goal, op.proactive
+            db, current, stream, request_key, op.kind, payload, goal, op.proactive
         )
         if created:
             await dispatch(

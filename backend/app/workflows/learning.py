@@ -12,7 +12,7 @@ with workflow.unsafe.imports_passed_through():
     from pydantic_ai.messages import ModelMessagesTypeAdapter
     from pydantic_ai.usage import UsageLimits
 
-    from app.agents.learning import AGENTS, build_prompt
+    from app.agents.learning import AGENTS, ChatActionRetry, build_prompt
     from app.workflows import activities
 
 
@@ -22,6 +22,8 @@ DB_OPTIONS = {"start_to_close_timeout": timedelta(seconds=30),
 
 def model_failure_code(error):
     while error is not None:
+        if isinstance(error, ChatActionRetry):
+            return "invalid_chat_action"
         if isinstance(error, ApplicationError) and error.type == "ProviderTimeout":
             return "model_timeout"
         if isinstance(error, ApplicationError) and error.type == "OperationDeadline":
@@ -48,7 +50,8 @@ class OperationWorkflow(PydanticAIWorkflow):
             agent = AGENTS[context["operation"]["kind"]]
             history = ModelMessagesTypeAdapter.validate_python(context.get("agent_history") or [])
             result = await agent.run(
-                build_prompt(context), deps={"operation": {"id": operation_id}}, message_history=history,
+                build_prompt(context), deps={"operation": {"id": operation_id},
+                                            "chat_request": context.get("chat_request")}, message_history=history,
                 model_settings={"learning_operation_id": operation_id},
                 usage_limits=UsageLimits(request_limit=6, total_tokens_limit=80000),
             )

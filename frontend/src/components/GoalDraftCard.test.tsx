@@ -109,4 +109,14 @@ describe('goal draft confirmation', () => {
     expect(screen.getByText(goal.background)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: original.title })).not.toBeInTheDocument()
   })
+
+  it('distinguishes an accepted historical draft from its now cancelled goal', async () => {
+    vi.mocked(api.operation).mockResolvedValue({ ...planning, status: 'failed', stage: 'failed' })
+    mount({ ...proposal, status: 'accepted', goal_id: 'cancelled-goal', goal_status: 'cancelled', plan_operation_id: 'planning-op' })
+    expect(screen.getByText('已取消的目标')).toBeInTheDocument()
+    expect(screen.getByText('这个目标已取消，历史记录保留。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看目标历史' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认创建目标' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试生成计划' })).not.toBeInTheDocument()
+  })
 })

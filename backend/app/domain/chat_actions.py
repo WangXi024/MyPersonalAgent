@@ -20,7 +20,7 @@ async def apply_chat_actions(db, user, stream, source, result):
             async with db.begin_nested():
                 quote = action.request_quote.strip()
                 if quote not in str(source.payload.get("content", "")):
-                    raise DomainError("missing_user_request", "没有找到本条消息中的操作要求，未执行修改")
+                    raise DomainError("missing_user_request", "这次回复误用了其他消息中的要求，未执行修改。可以重新处理这条消息。")
                 if source.goal_id and source.goal_id != action.goal_id:
                     raise DomainError("wrong_goal", "请在个人对话中操作其他目标")
                 goal = await owned(db, Goal, action.goal_id, user.id)

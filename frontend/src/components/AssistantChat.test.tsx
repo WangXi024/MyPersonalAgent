@@ -121,6 +121,39 @@ describe('direct Agent conversation', () => {
     expect(screen.queryByText('要求已处理')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '查看目标历史' })).not.toBeInTheDocument()
   })
+  it('lets the user retry a fully blocked historical reply without sending a new message', async () => {
+    data.conversations = [globalConversation]
+    vi.mocked(api.messages).mockResolvedValue({
+      items: [{ id: 'blocked', seq: 1, role: 'assistant', type: 'assistant_reply', operation_id: 'blocked-op',
+        content: '原操作被拒绝', created_at: '2026-10-21T01:00:00Z',
+        actions: [{ kind: 'update_goal', status: 'blocked', goal_id: null, goal_title: '', operation_id: null, message: '原操作被拒绝' }],
+      }], last_seq: 1, read_seq: 0, has_more: false,
+    })
+    const command = vi.spyOn(api, 'command').mockResolvedValue({ operation_id: 'retried-op', status: 'accepted' })
+    const user = userEvent.setup()
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    const retry = await screen.findByRole('button', { name: '重新处理这条消息' })
+    expect(command).not.toHaveBeenCalled()
+    await user.click(retry)
+    expect(command).toHaveBeenCalledWith('/operations/blocked-op/retry', {}, expect.any(String))
+    expect(await screen.findByRole('button', { name: '已请求重新处理，请查看最新进度' })).toBeDisabled()
+  })
+  it('marks a previous successful edit as historical after its goal is cancelled', async () => {
+    data.conversations = [globalConversation]
+    data.goals = [{ ...bootstrap.goals[0], status: 'cancelled' }]
+    vi.mocked(api.messages).mockResolvedValue({
+      items: [{ id: 'historical-edit', seq: 1, role: 'assistant', type: 'assistant_reply',
+        content: '过去已更新', created_at: '2026-10-21T01:00:00Z',
+        actions: [{ kind: 'update_goal', status: 'applied', goal_id: data.goals[0].id, goal_title: data.goals[0].title,
+          operation_id: null, message: '过去已更新', changes: { deadline: '2026-10-27' } }],
+      }], last_seq: 1, read_seq: 0, has_more: false,
+    })
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByText('历史操作')).toBeInTheDocument()
+    expect(screen.getByText('这个目标现已取消；以下为当时保存的要求。')).toBeInTheDocument()
+    expect(screen.queryByText('要求已处理')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看目标历史' })).toHaveAttribute('href', `/goals/${data.goals[0].id}`)
+  })
   it('keeps an old failure next to its request before a later successful Markdown reply', async () => {
     data.conversations = [globalConversation]
     data.operations = [{ id: 'old-failed', goal_id: null, kind: 'tutor', status: 'failed', error_message: '旧请求失败', created_at: '2026-10-20T03:00:00Z', updated_at: '2026-10-20T03:00:08Z' }]

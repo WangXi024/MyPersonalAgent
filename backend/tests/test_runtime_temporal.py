@@ -548,3 +548,84 @@ async def test_chat_choice_reaches_durable_planner_and_stays_pending_until_accep
         finally:
             for workflow_id in parents:
                 await client.get_workflow_handle(workflow_id).cancel()
+
+
+@pytest.mark.parametrize("scenario", ["old_quote", "cancelled_target", "exhausted"])
+async def test_cancelled_goal_chat_corrects_output_before_committing(database, monkeypatch, scenario):
+    from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+    from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart, UserPromptPart
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.usage import RequestUsage
+    from temporalio.client import Client
+    from temporalio.worker import Replayer, Worker
+
+    from app.api.routes import assistant_conversation
+    from app.db.models import Goal, Message, Operation, Plan
+    from app.domain import commands, execution
+    from app.integrations.settings import runtime_settings
+    from app.workflows.activities import ACTIVITIES
+    from app.workflows.learning import OperationWorkflow
+
+    factory, user, _ = database
+    conversation = await assistant_conversation(user)
+    draft = {"title": "七天学习 Temporal", "background": "已会 Python，Docker 可用，每天30分钟",
+             "outcome": "理解持久化执行", "criteria": ["解释重放与 signal"], "deadline": None}
+    old_message = await commands.send_message(user.id, conversation["id"],
+        {"content": "使用方案二，Docker 挂在第三天"}, str(uuid4()))
+    await execution.commit_result(old_message["operation_id"], {"kind": "tutor", "message": "请确认旧草稿", "goal_draft": draft})
+    old = await commands.accept_goal_draft(user.id, old_message["operation_id"], str(uuid4()), draft)
+    await commands.control_goal(user.id, old["resource_id"], "cancel", 1, str(uuid4()))
+    content = "我想用七天学习一下 Temporal 持久化框架"
+    command = await commands.send_message(user.id, conversation["id"], {"content": content}, str(uuid4()))
+    calls = []
+
+    async def respond(self, messages, model_settings, model_request_parameters, **kwargs):
+        import json
+
+        calls.append(messages)
+        if len(calls) == 1:
+            prompt = next(p.content for m in reversed(messages) for p in m.parts
+                          if isinstance(p, UserPromptPart) and isinstance(p.content, str) and p.content.startswith("请根据"))
+            snapshot = json.loads(prompt.split("\n", 1)[1])
+            assert snapshot["chat_request"]["content"] == content
+            assert snapshot["goal_drafts"][0]["goal_status"] == "cancelled"
+        else:
+            assert any(isinstance(p, RetryPromptPart) for m in messages for p in m.parts)
+        if len(calls) == 1 or scenario == "exhausted":
+            output = {"kind": "tutor", "summary": "错误操作", "message": "这段错误答复不能发布",
+                      "actions": [{"kind": "update_goal", "goal_id": old["resource_id"], "expected_revision": 2,
+                                   "request_quote": content if scenario == "cancelled_target" else "使用方案二，Docker 挂在第三天",
+                                   "changes": {"background": "不应写入旧目标"}}]}
+        else:
+            output = {"kind": "tutor", "summary": "重新整理目标", "message": "旧目标已取消，请检查这份新草稿。",
+                      "goal_draft": draft}
+        return ModelResponse(parts=[ToolCallPart(model_request_parameters.output_tools[0].name, output)],
+                             usage=RequestUsage(input_tokens=30, output_tokens=50), model_name="test-provider")
+
+    monkeypatch.setattr(OpenAIChatModel, "request", respond)
+    monkeypatch.setattr(runtime_settings(), "litellm_api_key", SecretStr("test-only-not-a-provider-key"))
+    client = await Client.connect(os.environ["TEMPORAL_TEST_ADDRESS"],
+        namespace=os.getenv("TEMPORAL_TEST_NAMESPACE", "learning-agent"), plugins=[PydanticAIPlugin()])
+    queue, workflow_id = f"test-cancelled-chat-{uuid4()}", f"test-cancelled-chat-{uuid4()}"
+    async with Worker(client, task_queue=queue, workflows=[OperationWorkflow], activities=ACTIVITIES):
+        result = await client.execute_workflow(OperationWorkflow.run, command["operation_id"],
+            id=workflow_id, task_queue=queue, execution_timeout=timedelta(minutes=30))
+    if scenario == "exhausted":
+        assert len(calls) == 3 and result["status"] == "failed"
+        assert result["error_code"] == "invalid_chat_action"
+        assert "Agent 未能正确处理你这条消息" in result["error_message"]
+    else:
+        assert len(calls) == 2 and result["status"] == "succeeded"
+        assert result["result"]["goal_draft_status"] == "pending"
+    async with factory() as db:
+        goals = list(await db.scalars(select(Goal)))
+        assert len(goals) == 1 and goals[0].status == "cancelled" and goals[0].background == draft["background"]
+        assert await db.scalar(select(Plan)) is None
+        assert (await db.get(Operation, command["operation_id"])).model_requests == len(calls)
+        published = list(await db.scalars(select(Message).where(
+            Message.operation_id == command["operation_id"], Message.role == "assistant")))
+        assert len(published) == (0 if scenario == "exhausted" else 1)
+        assert all("错误答复" not in m.content for m in published)
+    history = await client.get_workflow_handle(workflow_id).fetch_history()
+    await Replayer(workflows=[OperationWorkflow], plugins=[PydanticAIPlugin()]).replay_workflow(history)
+    assert len(calls) == (3 if scenario == "exhausted" else 2)
