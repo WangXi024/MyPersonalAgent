@@ -1,0 +1,11 @@
+.model-usage{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.7;max-width:100%;overflow-wrap:anywhere}
+.model-usage>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;gap:3px 12px;align-items:baseline}
+.model-usage>summary::-webkit-details-marker{display:none}
+.model-usage>summary::after{content:'详情';text-decoration:underline;text-underline-offset:3px}
+.model-usage[open]>summary::after{content:'收起'}
+.model-usage-detail{padding-top:6px}
+.model-usage-detail p{margin:3px 0!important;font-size:11px!important;color:var(--muted)!important}
+.conversation-usage{flex-shrink:0;margin:0;padding:10px 20px;border-bottom:1px solid var(--line)}
+.conversation-usage[open]{max-height:180px;overflow-y:auto}
+.chat-workspace>.conversation-usage{padding-left:max(20px,calc((100% - 760px)/2));padding-right:max(20px,calc((100% - 760px)/2))}
+@media(max-width:720px){.conversation-usage{padding:8px 16px}.chat-workspace>.conversation-usage{padding:8px 16px}.model-usage>summary{gap:2px 9px}}

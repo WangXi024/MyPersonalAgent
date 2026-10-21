@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Header, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import load_only
 
 from app.agents.schemas import GoalDraft
 from app.api.auth import current_user
@@ -34,6 +35,7 @@ from app.db.models import (
 )
 from app.db.session import SessionFactory
 from app.domain import commands
+from app.domain.model_usage import public_usage, summarize_usage
 from app.domain.common import (
     DomainError,
     dispatch,
@@ -415,7 +417,8 @@ async def messages(
             Operation.user_id == user.id, Operation.id.in_([item.operation_id for item in items if item.operation_id])
         ))}
         return {
-            "items": [{**serialize(item), "actions": (
+            "items": [{**serialize(item), "usage": public_usage(operations[item.operation_id])
+                       if item.role == "assistant" and item.operation_id in operations else None, "actions": (
                 operations[item.operation_id].result.get("actions", [])
                 if item.role == "assistant" and item.operation_id in operations else []
             )} for item in items],
@@ -423,6 +426,18 @@ async def messages(
             "read_seq": conversation.read_seq,
             "has_more": bool(items and items[-1].seq < conversation.last_seq),
         }
+
+
+@router.get("/conversations/{conversation_id}/usage")
+async def conversation_usage(conversation_id: str, user=Depends(current_user)):
+    async with SessionFactory() as db:
+        await owned(db, Conversation, conversation_id, user.id)
+        operations = await db.scalars(select(Operation).where(
+            Operation.user_id == user.id, Operation.kind == "tutor",
+            Operation.payload["conversation_id"].as_string() == conversation_id,
+        ).options(load_only(Operation.model_requests, Operation.input_tokens, Operation.output_tokens,
+                            Operation.usage_details, Operation.versions)))
+        return summarize_usage(operations)
 
 
 async def conversation_model_json(db, conversation):

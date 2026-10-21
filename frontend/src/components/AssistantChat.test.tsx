@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -21,9 +21,35 @@ beforeEach(() => {
   vi.spyOn(api, 'messages').mockResolvedValue({ items: [], last_seq: 0, read_seq: 0, has_more: false })
   vi.spyOn(api, 'goalDrafts').mockResolvedValue({ items: [] })
   vi.spyOn(api, 'conversationModels').mockResolvedValue(conversationModels)
+  vi.spyOn(api, 'conversationUsage').mockResolvedValue({ requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_complete: true, estimated_cost_cny: '0.000000', cost_complete: true, pricing_known: true })
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 describe('direct Agent conversation', () => {
+  it('shows historical reply usage and refreshes cumulative usage after an operation event', async () => {
+    data.conversations = [globalConversation]
+    const usage = { model_name: '历史选择模型', requests: 2, input_tokens: 1000, output_tokens: 200,
+      total_tokens: 1200, usage_complete: true, cost_complete: true, pricing_known: true, estimated_cost_cny: '0.019200' }
+    vi.mocked(api.conversationUsage).mockResolvedValue(usage)
+    vi.mocked(api.messages).mockResolvedValue({ items: [{ id: 'usage-reply', seq: 1, role: 'assistant',
+      type: 'assistant_reply', operation_id: 'success-op', content: '已完成的回复', usage,
+      created_at: '2026-10-21T01:00:00Z' }], last_seq: 1, read_seq: 0, has_more: false })
+    const view = render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByText('历史选择模型')).toBeVisible()
+    const summary = await screen.findByLabelText('本对话累计用量')
+    expect(within(summary).getByText('2 次调用')).toBeVisible()
+    vi.mocked(api.conversationUsage).mockResolvedValue({ ...usage, requests: 3, usage_complete: false, cost_complete: false })
+    vi.mocked(api.messages).mockResolvedValue({ items: [], last_seq: 1, read_seq: 0, has_more: false })
+    data.operations = [{ id: 'failed-new', goal_id: null, kind: 'tutor', status: 'failed',
+      error_code: 'model_timeout', error_message: '超时', created_at: '2026-10-21T01:01:00Z',
+      usage: { ...usage, model_name: '失败请求模型', requests: 1, input_tokens: 0, output_tokens: 0,
+        total_tokens: 0, usage_complete: false, cost_complete: false, estimated_cost_cny: null } }]
+    revision += 1
+    view.rerender(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    await waitFor(() => expect(within(summary).getByText('3 次调用')).toBeVisible())
+    expect(screen.getByText('失败请求模型')).toBeVisible()
+    expect(screen.getByText('费用未知')).toBeVisible()
+    expect(screen.getByText('历史选择模型')).toBeVisible()
+  })
   it('loads the saved model and changes it without losing input or sending a message', async () => {
     data.conversations = [globalConversation]
     const options = [...conversationModels.items, { id: 'learning-fallback', name: '第二个模型', provider: 'zhipu' as const }]

@@ -110,14 +110,14 @@ async def test_concurrent_model_calls_do_not_mutate_the_shared_agent(monkeypatch
 
     async def reserve(operation_id, limit):
         await asyncio.sleep(0)
-        return {"model_alias": "learning-fallback" if operation_id == "second" else "learning-agent"}
+        return {"model_alias": "learning-fallback" if operation_id == "second" else "learning-agent", "requests": 1}
 
     async def request(self, messages, model_settings, parameters):
         routed.append((self.model_name, self.provider.client))
         assert "learning_operation_id" not in model_settings
         return ModelResponse(parts=[TextPart("test response")])
 
-    async def record(operation_id, input_tokens, output_tokens):
+    async def record(operation_id, input_tokens, output_tokens, request_number):
         recorded.append(operation_id)
 
     monkeypatch.setattr(execution, "reserve_model_request", reserve)

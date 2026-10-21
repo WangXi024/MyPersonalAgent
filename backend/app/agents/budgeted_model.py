@@ -45,5 +45,5 @@ class BudgetedModel(WrapperModel):
         # Raise outside the handler so Temporal cannot serialize the original provider exception chain.
         if failure is not None:
             raise failure
-        await record_model_tokens(operation_id, response.usage.input_tokens, response.usage.output_tokens)
+        await record_model_tokens(operation_id, response.usage.input_tokens, response.usage.output_tokens, reservation["requests"])
         return response

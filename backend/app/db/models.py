@@ -261,6 +261,7 @@ class Operation(Entity, Base):
     model_requests: Mapped[int] = mapped_column(Integer, default=0)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    usage_details: Mapped[dict | None] = mapped_column(J)
     __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
 
 

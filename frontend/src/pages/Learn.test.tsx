@@ -13,6 +13,7 @@ beforeEach(() => {
   detail.tasks = [task]
   vi.spyOn(api, 'messages').mockResolvedValue({ items: [], last_seq: 0, read_seq: 0, has_more: false })
   vi.spyOn(api, 'conversationModels').mockResolvedValue(conversationModels)
+  vi.spyOn(api, 'conversationUsage').mockResolvedValue({ requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_complete: true, estimated_cost_cny: '0.000000', cost_complete: true, pricing_known: true })
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 function mount() { return render(<MemoryRouter initialEntries={['/goals/goal-1/learn?task=task-1']}><Routes><Route path="/goals/:goalId/learn" element={<Learn />} /></Routes></MemoryRouter>) }

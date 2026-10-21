@@ -39,6 +39,16 @@ Memory: `{id,source_id,source_type,version,content,status,suppressed,deleted,cre
 
 Runtime boundary `load_context` contains bounded context plus 14 days of shared budgets. Each budget has `available_minutes` and `replaceable_minutes` (the current goal's unstarted reservations; usable when replacing a plan, not when appending a recommendation). Memories are source metadata only; external recalled content must pass current source/version validation. Attachments include extracted text or an explicit unavailable warning.
 
+## Model usage
+
+Operation responses additionally include `usage`; assistant messages include the same field for their operation (user messages return null). Shape: `{model_name,model_id,provider,requests,input_tokens,output_tokens,total_tokens,usage_complete,estimated_cost_cny,cost_complete,pricing_known}`. Missing historical model metadata is null or the saved gateway alias; it is never replaced with the conversation's current selection. CNY amounts are decimal strings to six places, or null when unknown. Raw pricing/attempt metadata and credentials are not exposed.
+
+`GET /conversations/{id}/usage` returns the numeric/boolean/cost fields above aggregated over all tutor operations whose saved conversation ID matches, including failures, automatic and manual retries. It checks ownership, counts each operation once, and is independent of message pagination or the recent bootstrap window. Plans, assessments, Hindsight and model connection tests are outside this conversation-reply total; planning/assessment usage is shown on their operation cards.
+
+Migration `0005_model_usage` adds nullable `operations.usage_details`. New model operations snapshot the selected model display metadata and configured CNY input/output rates when accepted. Each provider attempt reserves its existing request counter; token reports are recorded once per attempt number. Attempts without a returned token report remain incomplete, even if a later retry succeeds. Historical rows remain null, retain existing token counts, and show unknown historical rates/completeness. No historical fees are backfilled from today's rates. Estimates use recorded input/output totals and saved rates, without provider-specific cache/tier adjustments; they are not invoices.
+
+`operation.usage_updated` SSE events refresh counters and the conversation total as attempts start or report usage. The UI labels partial totals and unknown costs explicitly; zero unreported tokens cannot be presented as a free failed request.
+
 ## Goal edits, conversational adjustments, and general chat
 
 - `PATCH /goals/{id}` accepts `{expected_version, title?, background?, outcome?, criteria?, deadline?}`. Only draft/active goals can be edited. A null deadline removes it; other supplied fields cannot be null. The authenticated user's explicit edit increments the goal control revision, supersedes the previous plan and unfinished background results, releases unstarted task reservations, and returns HTTP 202 for a new proposed plan. The goal remains draft until the user confirms that plan.

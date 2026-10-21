@@ -1003,14 +1003,21 @@ async def reserve_model_request(operation_id: str, limit: int = 6) -> dict:
 
         model_alias = await request_model(db, op.versions.get("model_alias"))
         op.model_requests += 1
+        await emit(db, stream, "operation.usage_updated", op.id, "模型调用用量已更新", op.goal_id, op.id)
         return {"requests": op.model_requests, "limit": min(limit, 6), "model_alias": model_alias}
 
 
-async def record_model_tokens(operation_id: str, input_tokens: int, output_tokens: int) -> dict:
+async def record_model_tokens(operation_id: str, input_tokens: int, output_tokens: int, request_number: int) -> dict:
     async with SessionFactory() as db, db.begin():
         op, user, stream, goal = await operation_locked(db, operation_id)
+        reports = (op.usage_details or {}).get("reported_requests", [])
+        if request_number in reports:
+            return {"input_tokens": op.input_tokens, "output_tokens": op.output_tokens}
         op.input_tokens += max(0, input_tokens)
         op.output_tokens += max(0, output_tokens)
+        if op.usage_details is not None and input_tokens + output_tokens > 0:
+            op.usage_details = {**op.usage_details, "reported_requests": [*reports, request_number]}
+        await emit(db, stream, "operation.usage_updated", op.id, "模型调用用量已更新", op.goal_id, op.id)
         return {"input_tokens": op.input_tokens, "output_tokens": op.output_tokens}
 
 

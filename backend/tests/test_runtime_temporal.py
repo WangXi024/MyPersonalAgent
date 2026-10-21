@@ -72,7 +72,13 @@ async def test_long_requests_retry_once_and_preserve_saved_content(database, mon
     if scenario == "timeout":
         assert result["error_code"] == "model_timeout" and "模型响应超时" in result["error_message"]
     async with factory() as db:
-        assert (await db.get(Operation, command["operation_id"])).model_requests == expected_calls
+        from app.domain.model_usage import public_usage
+
+        op = await db.get(Operation, command["operation_id"])
+        assert op.model_requests == expected_calls
+        usage = public_usage(op)
+        assert not usage["usage_complete"]  # even a recovered call cannot know the timed-out attempt's tokens
+        assert usage["total_tokens"] == (50 if scenario == "recover" else 0)
         if kind == "plan":
             assert await db.get(Goal, command["resource_id"]) is not None
             plans = list(await db.scalars(select(Plan).where(Plan.goal_id == command["resource_id"])))

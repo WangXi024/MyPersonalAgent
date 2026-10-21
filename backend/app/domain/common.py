@@ -51,9 +51,10 @@ def public_user(user):
 
 
 def public_operation(op):
-    return serialize(
-        op, {"user_id", "idempotency_key", "request_hash", "payload", "versions", "agent_history"}
-    )
+    from app.domain.model_usage import public_usage
+
+    return {**serialize(op, {"user_id", "idempotency_key", "request_hash", "payload", "versions", "agent_history", "usage_details"}),
+            "usage": public_usage(op)}
 
 
 async def lock_user(db, user_id):
@@ -140,13 +141,15 @@ async def new_operation(db, user, stream, key, kind, payload, goal=None, proacti
         "control_revision": goal.control_revision if goal else None,
         "active_plan_id": goal.active_plan_id if goal else None,
     }
-    if kind in {"tutor", "plan", "assessment", "recommendation"}:
-        from app.integrations.model_catalog import selected_model
+    usage_details = None
+    if kind in {"tutor", "plan", "assessment", "recommendation", "weekly_review"}:
+        from app.integrations.model_catalog import selected_model, usage_snapshot
 
         conversation = None
         if kind == "tutor" and payload.get("conversation_id"):
             conversation = await owned(db, Conversation, payload["conversation_id"], user.id)
         versions["model_alias"] = await selected_model(db, conversation.model_alias if conversation else None, snapshot=True)
+        usage_details = await usage_snapshot(db, versions["model_alias"])
     op = Operation(
         user_id=user.id,
         goal_id=goal.id if goal else None,
@@ -156,6 +159,7 @@ async def new_operation(db, user, stream, key, kind, payload, goal=None, proacti
         payload=payload,
         versions=versions,
         proactive=proactive,
+        usage_details=usage_details,
     )
     db.add(op)
     await db.flush()

@@ -3,13 +3,14 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
-import type { ConversationModels, GoalDraft, Message, Operation } from '../api/types'
+import type { ConversationModels, GoalDraft, Message, ModelUsageData, Operation } from '../api/types'
 import { useAction } from '../hooks'
 import { useApp } from '../state'
 import { ErrorNotice, OperationCard, timeLabel } from './ui'
 import { GoalDraftCard } from './GoalDraftCard'
 import { GoalActionReceipt } from './GoalActionReceipt'
 import { MarkdownMessage } from './MarkdownMessage'
+import { ModelUsage } from './ModelUsage'
 
 interface Props {
   conversationId: string | null
@@ -30,6 +31,8 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
   const messageAction = useAction()
   const operationAction = useAction()
   const modelAction = useAction()
+  const [usage, setUsage] = useState<ModelUsageData | null>(null)
+  const [usageError, setUsageError] = useState<Error | null>(null)
   const [models, setModels] = useState<ConversationModels | null>(null)
   const [modelsError, setModelsError] = useState<Error | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -50,6 +53,14 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
     void api.conversationModels(conversationId).then(result => {
       if (current) { setModels(previous => !previous || result.version >= previous.version ? result : previous); setModelsError(null) }
     }).catch(error => { if (current) setModelsError(error) })
+    return () => { current = false }
+  }, [conversationId, revision])
+  useEffect(() => {
+    if (!conversationId) return
+    let current = true
+    void api.conversationUsage(conversationId).then(result => {
+      if (current) { setUsage(result); setUsageError(null) }
+    }).catch(error => { if (current) setUsageError(error) })
     return () => { current = false }
   }, [conversationId, revision])
   const modelAvailable = models?.items.some(item => item.id === models.model_id)
@@ -137,13 +148,14 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
   </div>
   return <section className={`chat-card card ${compact ? 'chat-compact' : ''}${workspace ? ' chat-workspace' : ''}`} aria-label={goalId ? '学习对话' : '和 Agent 对话'}>
     {!workspace && <div className="chat-header"><div className="row"><span className="chat-avatar"><Sparkles size={19} /></span><div><strong>{goalId ? '和学习伙伴聊聊' : '和 Agent 聊聊'}</strong><small>{goalId ? '主动建议和你的问题，都在这里。' : '目标还没想清楚，也可以直接开始对话。'}</small></div></div>{compact ? <Link className="text-button" to="/assistant">完整对话<ArrowUpRight size={14} /></Link> : <MessageCircle size={18} />}</div>}
+    <ModelUsage usage={usage} aggregate /><ErrorNotice error={usageError} retry={() => void refresh()} />
     <div className="chat-messages" ref={chatPane}><ErrorNotice error={connectionError ?? null} retry={retryConnect} /><ErrorNotice error={messagesError} retry={() => void refresh()} /><ErrorNotice error={draftsError} retry={() => void refresh()} />{timeline.length ? timeline.map(entry => {
       if ('operation' in entry) return renderOperation(entry.operation)
       const item = entry.message
       const linkedGoal = goalId ?? data?.tasks.find(task => task.id === item.task_id)?.goal_id
       const draft = !goalId && item.role === 'assistant' ? goalDrafts.find(proposal => proposal.message_id === item.id) : undefined
       const operation = item.role === 'user' ? running.find(operation => operation.id === item.operation_id) : undefined
-      return <Fragment key={item.id}><article className={`chat-message ${item.role === 'user' ? 'from-user' : 'from-agent'}`}><div className="message-author">{item.role === 'user' ? '你' : '学习伙伴'}{item.type === 'proactive' && <span>主动建议</span>}<time>{timeLabel(item.created_at, data?.user.timezone)}</time></div><div className="message-bubble">{item.role === 'user' ? <p className="preserve-text">{item.content}</p> : <MarkdownMessage content={item.content} />}{item.task_id && linkedGoal && item.role !== 'user' && <Link className="message-task-link" to={`/goals/${linkedGoal}/learn?task=${item.task_id}`}>查看关联任务 <ArrowUpRight size={13} /></Link>}</div>{draft && <GoalDraftCard key={draft.operation_id} proposal={draft} />}{item.role === 'assistant' && item.actions?.map((result, index) => <GoalActionReceipt key={`${item.id}/${index}`} result={result} retrySourceId={index === 0 && item.actions?.every(action => action.status === 'blocked') ? item.operation_id : null} />)}</article>{operation && renderOperation(operation)}</Fragment>
+      return <Fragment key={item.id}><article className={`chat-message ${item.role === 'user' ? 'from-user' : 'from-agent'}`}><div className="message-author">{item.role === 'user' ? '你' : '学习伙伴'}{item.type === 'proactive' && <span>主动建议</span>}<time>{timeLabel(item.created_at, data?.user.timezone)}</time></div><div className="message-bubble">{item.role === 'user' ? <p className="preserve-text">{item.content}</p> : <MarkdownMessage content={item.content} />}{item.task_id && linkedGoal && item.role !== 'user' && <Link className="message-task-link" to={`/goals/${linkedGoal}/learn?task=${item.task_id}`}>查看关联任务 <ArrowUpRight size={13} /></Link>}</div>{draft && <GoalDraftCard key={draft.operation_id} proposal={draft} />}{item.role === 'assistant' && item.actions?.map((result, index) => <GoalActionReceipt key={`${item.id}/${index}`} result={result} retrySourceId={index === 0 && item.actions?.every(action => action.status === 'blocked') ? item.operation_id : null} />)}{item.role === 'assistant' && <ModelUsage usage={item.usage} />}</article>{operation && renderOperation(operation)}</Fragment>
     }) : <div className="chat-empty">{!workspace && <Sparkles size={28} />}<h3>{workspace ? '今天想学什么？' : goalId ? '不用一个人摸索。' : '想学什么，我们一起聊清楚。'}</h3><p>{workspace ? '说说你的目标，或遇到的问题。' : goalId ? '可以问一个问题，聊聊你卡住的地方，或者告诉我今天有多少时间。' : '说说你的兴趣、困惑，或者今天的学习状态。Agent 可以帮你整理目标草稿，修改并确认后，再一起准备计划。'}</p>{!goalId && <div className="chat-starters"><button type="button" disabled={messageAction.pending} onClick={() => setMessage('我想学点新东西，但还没想好从哪里开始。')}>还没想好学什么</button><button type="button" disabled={messageAction.pending} onClick={() => setMessage('我今天只有 15 分钟，怎样安排学习比较合适？')}>今天只有 15 分钟</button></div>}</div>}<ErrorNotice error={operationAction.error} /><div ref={chatEnd} className="chat-end" /></div>
     {!visibleEnd && messages.length > 0 && <button className="latest-message" onClick={() => { if (chatPane.current) chatPane.current.scrollTo({ top: chatPane.current.scrollHeight, behavior: 'smooth' }) }}>查看最新消息 ↓</button>}
     <form className="chat-composer" onSubmit={sendMessage}><ErrorNotice error={messageAction.error} /><ErrorNotice error={modelsError} retry={() => void refresh()} /><ErrorNotice error={modelAction.error} /><label className="sr-only" htmlFor={`chat-input-${goalId ?? 'assistant'}`}>给学习伙伴发消息</label><textarea id={`chat-input-${goalId ?? 'assistant'}`} disabled={!canSend || messageAction.pending} value={message} onChange={event => setMessage(event.target.value)} rows={workspace || compact ? 2 : 3} maxLength={10000} placeholder={canSend ? workspace ? '给 Agent 发消息…' : goalId ? '提个问题，或告诉我你现在的想法…' : '直接和 Agent 说说，你今天想学什么？' : '目标已结束，历史对话仍可查看。'} onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="composer-model-row">
