@@ -11,8 +11,9 @@ with workflow.unsafe.imports_passed_through():
     from pydantic_ai.durable_exec.temporal import PydanticAIWorkflow
     from pydantic_ai.messages import ModelMessagesTypeAdapter
     from pydantic_ai.usage import UsageLimits
+    from pydantic_ai_harness.compaction import pin
 
-    from app.agents.learning import AGENTS, RESEARCH_UI_AGENTS, ChatActionRetry, build_prompt
+    from app.agents.learning import AGENTS, RESEARCH_UI_AGENTS, TEACHING_AGENTS, ChatActionRetry, build_prompt
     from app.workflows import activities
 
 
@@ -37,7 +38,7 @@ def model_failure_code(error):
 
 @workflow.defn
 class OperationWorkflow(PydanticAIWorkflow):
-    __pydantic_ai_agents__ = (*AGENTS.values(), *RESEARCH_UI_AGENTS.values())
+    __pydantic_ai_agents__ = (*AGENTS.values(), *RESEARCH_UI_AGENTS.values(), *TEACHING_AGENTS.values())
 
     @workflow.run
     async def run(self, operation_id: str) -> dict:
@@ -48,22 +49,28 @@ class OperationWorkflow(PydanticAIWorkflow):
             await workflow.execute_activity(activities.set_stage, {
                 "operation_id": operation_id, "stage": "reasoning"}, **DB_OPTIONS)
             research_ui = workflow.patched("learning-research-ui-v1")
-            agents = RESEARCH_UI_AGENTS if research_ui else AGENTS
+            teaching = research_ui and workflow.patched("learning-teaching-ui-v1")
+            agents = TEACHING_AGENTS if teaching else RESEARCH_UI_AGENTS if research_ui else AGENTS
             agent = agents[context["operation"]["kind"]]
             history = ModelMessagesTypeAdapter.validate_python(context.get("agent_history") or [])
+            prompt = build_prompt(context)
             result = await agent.run(
-                build_prompt(context), deps={"operation": {"id": operation_id},
+                pin(prompt).content if teaching else prompt, deps={"operation": {"id": operation_id},
                                             "chat_request": context.get("chat_request"),
                                             **({"research_requested": context["operation"].get("payload", {}).get("research_requested") is True}
                                                if research_ui else {})}, message_history=history,
                 model_settings={"learning_operation_id": operation_id},
                 usage_limits=UsageLimits(request_limit=6, total_tokens_limit=80000),
+                **({"conversation_id": context["operation"].get("payload", {}).get("conversation_id")}
+                   if teaching else {}),
             )
             usage = result.usage
             await workflow.execute_activity(activities.save_usage, {
                 "operation_id": operation_id, "usage": {"requests": usage.requests,
                     "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens}}, **DB_OPTIONS)
             proposal = result.output.model_dump(mode="json")
+            if teaching:
+                proposal["teaching_version"] = "teaching-v1"
             proposal["agent_history"] = json.loads(result.new_messages_json())
             await workflow.execute_activity(activities.set_stage, {
                 "operation_id": operation_id, "stage": "validating"}, **DB_OPTIONS)

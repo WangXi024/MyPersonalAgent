@@ -68,6 +68,52 @@ async def test_retry_from_general_chat_is_real_idempotent_and_links_to_progress(
     assert next(m for m in page["items"] if m["id"] == msg.id)["actions"] == [receipt]
 
 
+@pytest.mark.parametrize("with_quiz", [False, True])
+async def test_v3_actions_keep_strict_authorization_and_can_publish_a_practice_quiz(database, with_quiz):
+    factory, user, _ = database
+    goal = await setup_goal(user)
+    command = await say(user, "重试计划，顺便出一道练习")
+    quiz = {"type": "quiz", "title": "持久执行自测", "questions": [{"prompt": "哪项是持久执行的作用？",
+        "choices": [{"id": "a", "text": "跨重启恢复"}, {"id": "b", "text": "自动代表用户确认计划"}],
+        "correct_choice_id": "a", "explanation": "持久执行恢复流程，业务确认仍由用户完成。"}]}
+    proposal = {"kind": "tutor", "summary": "重试计划", "message": "请检查回执与练习。",
+        "actions": [action(goal, "重试计划")], "ui_components": [quiz] if with_quiz else [],
+        "agent_history": [], "teaching_version": "teaching-v1"}
+    result = await execution.commit_result(command["operation_id"], proposal)
+    assert result == await execution.commit_result(command["operation_id"], proposal)
+    receipt = result["result"]["actions"][0]
+    assert receipt["status"] == "applied" and receipt["operation_id"] != goal["operation_id"]
+    assert "private_quizzes" not in result["result"]
+    if with_quiz:
+        block = result["result"]["ui_components"][0]
+        assert block["type"] == "quiz" and block["practice_only"] and block["attempt"] is None
+        assert "correct_choice_id" not in str(block) and "explanation" not in str(block)
+    async with factory() as db:
+        follow = await db.get(Operation, receipt["operation_id"])
+        assert follow.payload["source_operation_id"] == command["operation_id"] and follow.status == "accepted"
+        assert await db.scalar(select(func.count()).select_from(Plan)) == 0  # Still a proposal-generation request.
+        stored = await db.get(Operation, command["operation_id"])
+        assert bool(stored.result.get("private_quizzes")) == with_quiz
+
+
+@pytest.mark.parametrize("marker", [None, "teaching-v1", "teaching-v99"])
+async def test_action_validation_rejects_unknown_metadata_on_old_and_v3_paths(database, marker):
+    factory, user, _ = database
+    goal = await setup_goal(user)
+    command = await say(user, "重试计划")
+    proposal = {"kind": "tutor", "summary": "测试", "message": "不能发布",
+        "actions": [action(goal, "重试计划")], "unexpected_metadata": True, "agent_history": []}
+    if marker is not None:
+        proposal["teaching_version"] = marker
+    with pytest.raises(DomainError) as rejected:
+        await execution.commit_result(command["operation_id"], proposal)
+    assert rejected.value.code == "invalid_chat_actions"
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(Operation).where(
+            Operation.goal_id == goal["resource_id"], Operation.kind == "plan")) == 1
+        assert not await db.scalar(select(Message).where(Message.operation_id == command["operation_id"], Message.role == "assistant"))
+
+
 async def test_confirmed_choices_update_goal_cancel_unrelated_goal_and_reach_planner(database):
     factory, user, _ = database
     goal = await setup_goal(user)

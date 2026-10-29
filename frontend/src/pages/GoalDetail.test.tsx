@@ -18,6 +18,14 @@ function milestoneBranch(title: string) {
   return branch!
 }
 describe('goal detail contract', () => {
+  it('offers an explicit report download on an ended goal without modifying its state', () => {
+    detail.goal.status = 'cancelled'
+    const report = vi.spyOn(api, 'learningReport')
+    const command = vi.spyOn(api, 'command')
+    mount()
+    expect(screen.getByRole('button', { name: '下载学习报告' })).toBeEnabled()
+    expect(report).not.toHaveBeenCalled(); expect(command).not.toHaveBeenCalled()
+  })
   it('counts evidence_available only in the active plan and enables completion', () => {
     detail.milestones = [
       { id: 'm1', plan_id: 'plan-1', title: '当前阶段', criteria: ['完成练习'], status: 'evidence_available', position: 0 },

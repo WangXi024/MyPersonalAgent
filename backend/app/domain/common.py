@@ -55,7 +55,7 @@ def public_operation(op):
 
     return {**serialize(op, {"user_id", "idempotency_key", "request_hash", "payload", "versions", "agent_history", "usage_details"}),
             "result": {key: value for key, value in (op.result or {}).items()
-                       if key not in {"research_sources", "research_calls"}},
+                       if key not in {"research_sources", "research_calls", "private_quizzes", "quiz_request_keys", "history_calls"}},
             "usage": public_usage(op)}
 
 

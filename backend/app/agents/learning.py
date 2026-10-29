@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 
 from openai import AsyncOpenAI
-from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai import Agent, FunctionToolset, ModelRetry, RunContext
 from pydantic_ai.capabilities import WebFetch, WebSearch
 from pydantic_ai.tools import Tool, ToolDefinition
 from pydantic_ai.durable_exec.temporal import TemporalDurability
@@ -139,7 +139,10 @@ async def fetch_learning_resource(ctx: RunContext[dict], url: str) -> dict:
     return await fetch_for_operation(ctx.deps["operation"]["id"], url, ctx.tool_call_id)
 
 
-def build_agent(kind: str, output_type: type, *, research_ui: bool = False) -> Agent:
+def build_agent(kind: str, output_type: type, *, research_ui: bool = False, teaching: bool = False) -> Agent:
+    if teaching:
+        research_ui = True
+    from app.agents.teaching import TEACHING_INSTRUCTIONS, teaching_capabilities
     settings = runtime_settings()
     model = OpenAIChatModel(
         settings.litellm_model_alias,
@@ -151,10 +154,10 @@ def build_agent(kind: str, output_type: type, *, research_ui: bool = False) -> A
     )
     agent = Agent(
         BudgetedModel(model),
-        name=f"learning_{kind}_{'v2' if research_ui else 'v1'}",
+        name=f"learning_{kind}_v3" if teaching else f"learning_{kind}_{'v2' if research_ui else 'v1'}",
         output_type=output_type,
         deps_type=dict,
-        instructions=INSTRUCTIONS + (UI_INSTRUCTIONS if research_ui else ""),
+        instructions=INSTRUCTIONS + (UI_INSTRUCTIONS if research_ui else "") + (TEACHING_INSTRUCTIONS if teaching else ""),
         retries=2,
         model_settings={"max_tokens": settings.model_output_tokens, "timeout": 600 if kind in {"plan", "tutor"} else 90},
         capabilities=[TemporalDurability(activity_config={
@@ -164,9 +167,11 @@ def build_agent(kind: str, output_type: type, *, research_ui: bool = False) -> A
             "start_to_close_timeout": timedelta(seconds=660),
             "retry_policy": RetryPolicy(maximum_attempts=2, initial_interval=timedelta(seconds=2)),
         } if kind in {"plan", "tutor"} else None)] + ([
-            WebSearch(native=False, local=Tool(search_learning_resources, prepare=prepare_research)),
-            WebFetch(native=False, local=Tool(fetch_learning_resource, prepare=prepare_research)),
-        ] if research_ui and kind == "tutor" else []),
+            WebSearch(native=False, local=FunctionToolset([Tool(search_learning_resources, prepare=prepare_research)], id="web_search")
+                      if teaching else Tool(search_learning_resources, prepare=prepare_research)),
+            WebFetch(native=False, local=FunctionToolset([Tool(fetch_learning_resource, prepare=prepare_research)], id="web_fetch")
+                     if teaching else Tool(fetch_learning_resource, prepare=prepare_research)),
+        ] if research_ui and kind == "tutor" else []) + (teaching_capabilities(kind) if teaching else []),
     )
 
     if kind == "tutor":
@@ -195,6 +200,18 @@ RESEARCH_UI_AGENTS = {
     "tutor": build_agent("tutor", TutorProposal, research_ui=True),
     "assessment": build_agent("assessment", AssessmentProposal, research_ui=True),
     "recommendation": build_agent("recommendation", RecommendationProposal, research_ui=True),
+}
+
+
+from app.agents.schemas_v3 import (  # noqa: E402 -- old registered agents retain their exact schema types
+    AssessmentProposalV3, PlanProposalV3, RecommendationProposalV3, TutorProposalV3,
+)
+
+TEACHING_AGENTS = {
+    "plan": build_agent("plan", PlanProposalV3, teaching=True),
+    "tutor": build_agent("tutor", TutorProposalV3, teaching=True),
+    "assessment": build_agent("assessment", AssessmentProposalV3, teaching=True),
+    "recommendation": build_agent("recommendation", RecommendationProposalV3, teaching=True),
 }
 
 

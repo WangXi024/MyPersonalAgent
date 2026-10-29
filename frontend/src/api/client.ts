@@ -1,4 +1,4 @@
-import type { Accepted, Bootstrap, CodingRun, CodingRunInput, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, SandboxExecution, SandboxExecutionInput, Settings, User } from './types'
+import type { Accepted, Bootstrap, CodingRun, CodingRunInput, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, QuizAnswer, QuizAttempt, SandboxExecution, SandboxExecutionInput, Settings, User } from './types'
 import type { VoiceCapabilities, VoiceConfig, VoiceConfigInput, VoiceSession, VoiceTicket } from '../voice/types'
 
 let csrfToken = ''
@@ -29,6 +29,19 @@ export async function request<T>(path: string, options: { method?: string; body?
   return payload as T
 }
 export const api = {
+  submitQuizAttempt: (operationId: string, quizId: string, answers: QuizAnswer[], key: string) => request<QuizAttempt>(`/operations/${encodeURIComponent(operationId)}/quizzes/${encodeURIComponent(quizId)}/attempts`, { method: 'POST', body: { answers }, key }),
+  learningReport: async (goalId: string, signal?: AbortSignal) => {
+    let response: Response
+    try { response = await fetch(`/api/v1/goals/${encodeURIComponent(goalId)}/report.md`, { credentials: 'same-origin', headers: { Accept: 'text/markdown' }, signal }) }
+    catch (error) { if (error instanceof DOMException && error.name === 'AbortError') throw error; throw new ApiError(0, '报告暂时无法下载，请稍后重试。') }
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null)
+      throw new ApiError(response.status, payload?.message || payload?.detail?.message || (response.status === 401 ? '登录已过期，请重新登录。' : response.status === 404 ? '这份学习报告不可用。' : '报告暂时无法下载，请稍后重试。'))
+    }
+    if (response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'text/markdown') throw new ApiError(0, '报告响应格式不正确，请稍后重试。')
+    const filename = /^attachment;\s*filename="(learning-report-[a-zA-Z0-9_-]+\.md)"$/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? 'learning-report.md'
+    return { blob: await response.blob(), filename }
+  },
   login: (username: string, password: string) => request<{ user: User; csrf_token: string }>('/auth/login', { method: 'POST', body: { username, password } }),
   me: () => request<{ user: User; csrf_token: string }>('/auth/me'),
   assistantConversation: (key: string) => request<Conversation>('/assistant/conversation', { method: 'POST', body: {}, key }),

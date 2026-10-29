@@ -7,6 +7,7 @@ eventTypes.push('sandbox.execution_updated')
 eventTypes.push('coding.run_updated')
 eventTypes.push('voice.session_updated')
 eventTypes.push('voice.configured')
+eventTypes.push('quiz.attempted')
 
 /** One persisted event stream for the whole authenticated application. */
 export function openEventStream(cursor: number, onEvent: (event: Activity) => void, onState: (state: ConnectionState) => void, onReset: () => void, onReconnect: () => void) {

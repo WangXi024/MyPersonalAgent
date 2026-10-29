@@ -14,6 +14,16 @@ class FakeEventSource {
 }
 
 describe('persistent event stream', () => {
+  it('delivers persisted practice-attempt events once without creating a learning-state event', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const onEvent = vi.fn(), close = openEventStream(2, onEvent, vi.fn(), vi.fn(), vi.fn())
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('quiz.attempted', { seq: 3, type: 'quiz.attempted', operation_id: 'tutor-1' })
+    source.emit('quiz.attempted', { seq: 3, type: 'quiz.attempted', operation_id: 'tutor-1' })
+    expect(onEvent).toHaveBeenCalledOnce()
+    expect(onEvent.mock.calls[0][0].type).toBe('quiz.attempted')
+    close(); vi.unstubAllGlobals()
+  })
   it('refreshes saved voice metadata and configuration without a second audio connection', () => {
     vi.stubGlobal('EventSource', FakeEventSource)
     const onEvent = vi.fn()

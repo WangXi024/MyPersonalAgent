@@ -12,6 +12,17 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 pytestmark = pytest.mark.skipif(not os.getenv("TEMPORAL_TEST_ADDRESS"), reason="Set TEMPORAL_TEST_ADDRESS")
 
 
+def public_prompt_text(part):
+    """V3 pins use public TextContent; legacy requests remain plain strings."""
+    from pydantic_ai.messages import TextContent, UserPromptPart
+
+    if not isinstance(part, UserPromptPart):
+        return None
+    if isinstance(part.content, str):
+        return part.content
+    return "".join(item.content for item in part.content if isinstance(item, TextContent))
+
+
 @pytest.mark.parametrize("scenario,expected_calls", [("timeout", 2), ("recover", 2), ("authentication", 1)])
 @pytest.mark.parametrize("kind", ["plan", "tutor"])
 async def test_long_requests_retry_once_and_preserve_saved_content(database, monkeypatch, scenario, expected_calls, kind):
@@ -447,7 +458,7 @@ async def test_chat_choice_reaches_durable_planner_and_stays_pending_until_accep
     from zoneinfo import ZoneInfo
 
     from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
-    from pydantic_ai.messages import ModelResponse, ToolCallPart, UserPromptPart
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.usage import RequestUsage
     from temporalio.client import Client
@@ -478,9 +489,8 @@ async def test_chat_choice_reaches_durable_planner_and_stays_pending_until_accep
         planning = "milestones" in tool.parameters_json_schema.get("properties", {})
         calls.append("plan" if planning else "tutor")
         if planning:
-            prompt = next(part.content for msg in reversed(messages) for part in msg.parts
-                          if isinstance(part, UserPromptPart) and isinstance(part.content, str)
-                          and part.content.startswith("请根据"))
+            prompt = next(text for msg in reversed(messages) for part in msg.parts
+                          if (text := public_prompt_text(part)) and text.startswith("请根据"))
             context = json.loads(prompt.split("\n", 1)[1])
             assert context["goal"]["deadline"] == deadline and context["goal"]["background"] == background
             assert context["planning_request"]["user_message"] == choice
@@ -559,7 +569,7 @@ async def test_chat_choice_reaches_durable_planner_and_stays_pending_until_accep
 @pytest.mark.parametrize("scenario", ["old_quote", "cancelled_target", "exhausted"])
 async def test_cancelled_goal_chat_corrects_output_before_committing(database, monkeypatch, scenario):
     from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
-    from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart, UserPromptPart
+    from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.usage import RequestUsage
     from temporalio.client import Client
@@ -590,8 +600,8 @@ async def test_cancelled_goal_chat_corrects_output_before_committing(database, m
 
         calls.append(messages)
         if len(calls) == 1:
-            prompt = next(p.content for m in reversed(messages) for p in m.parts
-                          if isinstance(p, UserPromptPart) and isinstance(p.content, str) and p.content.startswith("请根据"))
+            prompt = next(text for m in reversed(messages) for p in m.parts
+                          if (text := public_prompt_text(p)) and text.startswith("请根据"))
             snapshot = json.loads(prompt.split("\n", 1)[1])
             assert snapshot["chat_request"]["content"] == content
             assert snapshot["goal_drafts"][0]["goal_status"] == "cancelled"

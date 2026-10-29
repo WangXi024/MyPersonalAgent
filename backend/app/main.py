@@ -14,6 +14,8 @@ from app.api.sandbox import router as sandbox_router
 from app.api.coding import router as coding_router
 from app.api.voice import router as voice_router
 from app.api.voice_socket import router as voice_socket_router
+from app.api.practice import router as practice_router
+from app.api.reports import router as reports_router
 from app.db.session import SessionFactory, engine
 from app.domain.common import DomainError
 
@@ -32,6 +34,8 @@ app.include_router(sandbox_router, prefix="/api/v1")
 app.include_router(coding_router, prefix="/api/v1")
 app.include_router(voice_router, prefix="/api/v1")
 app.include_router(voice_socket_router, prefix="/api/v1")
+app.include_router(practice_router, prefix="/api/v1")
+app.include_router(reports_router, prefix="/api/v1")
 
 
 @app.middleware("http")

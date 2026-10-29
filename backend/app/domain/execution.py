@@ -550,7 +550,13 @@ async def commit_result(operation_id: str, result: dict) -> dict:
 
         research_sources = op.result.get("research_sources", [])
         research_calls = op.result.get("research_calls", {})
-        ui_components = build_ui_components(result.get("ui_components", []), research_sources)
+        history_calls = op.result.get("history_calls", [])
+        private_quizzes = {}
+        if result.get("teaching_version") == "teaching-v1":
+            from app.agents.ui_v3 import build_v3_ui
+            ui_components, private_quizzes = await build_v3_ui(db, op, result.get("ui_components", []), research_sources)
+        else:
+            ui_components = build_ui_components(result.get("ui_components", []), research_sources)
         draft = result.get("goal_draft")
         if draft is not None:
             if not global_tutor or result.get("follow_up") is not None:
@@ -745,6 +751,13 @@ async def commit_result(operation_id: str, result: dict) -> dict:
             op.result = {**op.result, "research_calls": research_calls}
         if ui_components:
             op.result = {**op.result, "ui_components": ui_components}
+        if result.get("teaching_version") == "teaching-v1":
+            from app.agents.teaching import TEACHING_PACK_SHA256, TEACHING_VERSION
+            op.result = {**op.result, "teaching_version": TEACHING_VERSION, "teaching_pack_sha256": TEACHING_PACK_SHA256}
+            if history_calls:
+                op.result = {**op.result, "history_calls": history_calls}
+        if private_quizzes:
+            op.result = {**op.result, "private_quizzes": private_quizzes}
         if action_receipts:
             op.result = {**op.result, "actions": action_receipts}
         if draft is not None:

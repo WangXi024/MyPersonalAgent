@@ -6,6 +6,7 @@ import { api, ApiError } from '../api/client'
 import type { GenUIBlock, GoalDraft, Message } from '../api/types'
 import { bootstrap, conversationModels } from '../test/fixtures'
 import { voiceCapabilities, voiceSession } from '../test/voice-fixtures'
+import { quizAttempt, quizBlock } from '../test/generative-fixtures'
 import { Assistant } from '../pages/Assistant'
 import { AssistantChat } from './AssistantChat'
 let data = structuredClone(bootstrap)
@@ -27,6 +28,28 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 describe('direct Agent conversation', () => {
+  it('refreshes practice feedback for an older message from its scoped operation after an event revision', async () => {
+    data.conversations = [globalConversation]
+    vi.mocked(api.messages).mockResolvedValue({ items: [{ id: 'quiz-message', seq: 1, role: 'assistant', type: 'assistant_reply', operation_id: 'tutor-1', content: '先做一个不计学习进度的小练习。', ui_components: [quizBlock], created_at: quizAttempt.submitted_at }], last_seq: 1, read_seq: 0, has_more: false })
+    const operation = vi.spyOn(api, 'operation').mockResolvedValue({ id: 'tutor-1', kind: 'tutor', status: 'succeeded', goal_id: null, created_at: quizAttempt.submitted_at, result: { ui_components: [quizBlock] } })
+    const submit = vi.spyOn(api, 'submitQuizAttempt')
+    const view = render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    await waitFor(() => expect(operation).toHaveBeenCalledOnce())
+    expect(screen.queryByText('参考答案：return')).not.toBeInTheDocument()
+    vi.mocked(api.messages).mockResolvedValue({ items: [], last_seq: 1, read_seq: 0, has_more: false })
+    operation.mockResolvedValue({ id: 'tutor-1', kind: 'tutor', status: 'succeeded', goal_id: null, created_at: quizAttempt.submitted_at, result: { ui_components: [{ ...quizBlock, attempt: quizAttempt, attempt_count: 1 }] } })
+    revision++
+    view.rerender(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByText('参考答案：return')).toBeVisible()
+    expect(api.messages).toHaveBeenLastCalledWith(globalConversation.id, 1)
+    expect(submit).not.toHaveBeenCalled()
+    view.unmount()
+    // The conversation can still recover from the public operation if the message snapshot is older.
+    vi.mocked(api.messages).mockResolvedValue({ items: [{ id: 'quiz-message', seq: 1, role: 'assistant', type: 'assistant_reply', operation_id: 'tutor-1', content: '历史练习', ui_components: [quizBlock], created_at: quizAttempt.submitted_at }], last_seq: 1, read_seq: 0, has_more: false })
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByText('参考答案：return')).toBeVisible()
+    expect(submit).not.toHaveBeenCalled()
+  })
   it('appends reviewed voice text to the existing composer and sends only after the normal send action', async () => {
     const user = userEvent.setup()
     data.conversations = [globalConversation]

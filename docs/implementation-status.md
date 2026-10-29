@@ -12,7 +12,8 @@
 | 二 A | 自研 sandbox AMD64 适配、RPC 客户端与受控 Python 运行 | 已在本机部署并启用；真实节点 + Temporal + 临时数据库的成功、异常、超时、运行中取消四场景全通过；另有 57 项隔离 PostgreSQL/Temporal 集成检查及独立迁移检查通过；不将运行回执当作业通过 |
 | 二 B | Coder 工作区与可信命令回执 | 已在本机部署并启用；官方真实 WorkspaceBackendSuite 38/38、Coder/Temporal 成功与运行中取消及历史重放通过；原一次性接口四场景兼容通过。测试模型为替身，无生产学习数据写入 |
 | 三 | 实时语音会话与配置界面、学习工作流交接 | 已在本机部署至0008；后端独立 PG/Temporal 全套335通过（另38个真实节点契约已在二B实测），前端150、配置10、真实Nginx合成PCM代理通过。供应商暂未选择，不建立实际计费会话 |
-| 四 | 教学 Skills、历史检索与压缩、工具输出限制、文档与报告 | 待实施；按可独立验收功能逐项交付 |
+| 四 | 教学能力、历史检索与压缩、工具输出限制、自测/进度组件与学习报告 | 实现和完整回归通过，准备本机更新；独立PG/Temporal后端375通过/38已单独实测的节点契约跳过，前端175通过 |
+| 五 | 可信编程测试、sandbox学习材料解析 | 待实施；补齐原清单T07与T13材料处理部分，不能把Coder自写测试或AI自测当可信评分 |
 | 后续 | Advisor | 暂缓；官方本地回退当前不支持持久执行，需要先验证原生路线与用量统计 |
 
 阶段一新增 `research_requested`：聊天输入默认关闭“联网查资料”，本次开启后才允许 tutor 对外搜索/读取；查询只发送必要主题词。部署同时需 `RESEARCH_ENABLED=true`。联网调用使用官方 `WebSearch`/`WebFetch` 的自定义 local 工具，保留 Temporal 活动执行、操作作用域、次数限制和去重缓存；不用现有网关冒充原生搜索。
@@ -67,6 +68,15 @@
 - 新 Nginx 原始配置在两条独立测试网络上验证实际主机端口、Upgrade、Host/Origin/Cookie透传、首JSON及3200/4800/65536字节合成PCM逐字节往返；测试容器/网络核验标签清理，未连接生产网络或凭据。Nginx配置检查与Composequiet通过。
 - 迁移前已保存 `.backups/personal-agent-20261029T080847Z.tar.age`（3206088字节）：五数据库、附件/服务凭据、配置及主项目/自研sandbox两个本地Git bundle；认证解密及结构检查通过，未进行新部署完整恢复演练。明文暂存/维护锁已清理，原容器恢复并通过0007健康/login/bootstrap/logout。真实语音供应商仍保持未选择。
 - 语音实现已保存本地检查点 `7017ca3`，未推送。API/Worker/Dispatcher/Web已更新，0008 ready、静态界面与AudioWorklet、登录/bootstrap/退出及实际Nginx下的Origin/无效票据拒绝通过；实际Worker的Temporal定时器/活动检查通过。API可读取本机语音加密主密钥，Worker没有该密钥挂载；9个应用服务正常，其中7个健康检查通过。正式配置仍为provider=null、enabled=false，没有供应商调用或物理麦克风录音。
+
+阶段四当前实现与验收：
+
+- 新增独立V3 Agent/输出Schema与 `learning-teaching-ui-v1` Temporal marker，保留原V1/V2注册及验证路径。教学包固定为三个按需加载的官方Capability（主动回忆、调试指导、证据反馈），持久记录版本与SHA-256；不是读取本机任意SKILL/目录的工具。
+- 使用官方ConversationSearchToolset，范围从操作解析为当前用户/对话/目标及旧消息截止点；只检索公开user/assistant文本，排除内部trace/私有答案/未来消息。补中文原文匹配，源最多200条/64k字符，单条4k、返回12k、最多8次；授权变化停止检索。
+- 官方SlidingWindowCompaction与显式Truncate，不使用摘要模型或overflow workspace；使用官方pin保留本run当前请求和业务快照。仅V3使用静态WebSearch/WebFetch FunctionToolset，解决deferred加载后重新收集时SDK拒绝工具identity变化的问题。旧版路径不改。
+- 新增Quiz/Progress注册组件。题目答案保存在私有操作结果，用户完整选答后才显式检查；幂等重试、每组最多5次、刷新/SSE恢复，练习不写Task/Evaluation/学习时长。进度由当前有效计划/提交/量规/评估计算并标明快照，历史技能不混入当前记录；不展示模型编造的掌握率。对话业务操作采用对应版本严格Schema，未知字段仍拒绝。
+- 目标详情提供只读Markdown报告（结束目标亦可），来自实际数据库且标记当前/历史与AI审阅边界；限512KiB/固定行数，不导出对话/记忆/凭据/内部trace/程序日志。认证、外用户404、文本转义和下载headers通过。
+- 冻结后的完整后端在独立tmpfs PostgreSQL与真实Temporal上375通过，38跳过为已在二B实测的节点契约；包含并发quiz、真实load_capability/history工具活动、长历史压缩、Quiz/Progress保存、V1/V2/V3回放且重放不重复查历史/请求模型。前端24文件175项、TypeScript/ESLint/生产构建及Ruff通过。无新增迁移/依赖/服务，schema仍为0008；付费模型/真实语音调用为0。
 
 ## 已实现
 

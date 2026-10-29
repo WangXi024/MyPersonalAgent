@@ -21,9 +21,16 @@ export interface ModelUsageData { model_name?: string | null; model_id?: string 
 export interface ResourceListItem { id: string; title: string; url: string; snippet: string; retrieved_at: string }
 export interface ResourceListBlock { type: 'resource_list'; id: string; title: string; items: ResourceListItem[] }
 export interface ChecklistBlock { type: 'checklist'; id: string; title: string; items: string[] }
-export type GenUIBlock = ResourceListBlock | ChecklistBlock
+export interface QuizChoice { id: string; text: string }
+export interface QuizQuestion { id: string; prompt: string; choices: QuizChoice[] }
+export interface QuizAnswer { question_id: string; choice_id: string }
+export interface QuizAttempt { id: string; quiz_id: string; attempt_number: number; submitted_at: string; practice_only: true; answers: QuizAnswer[]; correct_count: number; total: number; feedback: { question_id: string; selected_choice_id: string; correct_choice_id: string; correct: boolean; explanation: string }[] }
+export interface QuizBlock { type: 'quiz'; id: string; operation_id: string; quiz_id: string; title: string; practice_only: true; questions: QuizQuestion[]; attempt: QuizAttempt | null; attempt_count: number; max_attempts: 5 }
+export interface ProgressSnapshot { goal_id: string; title: string; goal_status: GoalStatus; goal_revision: number; plan_id: string | null; as_of: string; tasks: { total: number; completed: number; in_progress: number; awaiting_review: number; needs_revision: number; ready: number; skipped: number }; skills: { total: number; needs_review: number }; evidence: { ai_review: number; verified_tests: 0 } }
+export interface ProgressBlock { type: 'progress'; id: string; title: string; snapshot: ProgressSnapshot }
+export type GenUIBlock = ResourceListBlock | ChecklistBlock | QuizBlock | ProgressBlock
 export interface Message { usage?: ModelUsageData | null; id: string; seq: number; role: string; type: string; content: string; task_id?: string | null; operation_id?: string | null; created_at: string; actions?: GoalActionResult[]; ui_components?: GenUIBlock[] }
-export interface Operation { usage?: ModelUsageData; id: string; kind: string; status: OperationStatus; goal_id: string | null; stage?: string | null; error_code?: string | null; error_message?: string | null; created_at: string; updated_at?: string }
+export interface Operation { usage?: ModelUsageData; id: string; kind: string; status: OperationStatus; goal_id: string | null; stage?: string | null; error_code?: string | null; error_message?: string | null; created_at: string; updated_at?: string; result?: { ui_components?: GenUIBlock[] } }
 export interface Activity { seq: number; type: string; summary: string; goal_id?: string | null; operation_id?: string | null; created_at: string }
 export interface DailyBudget { local_date: string; authorized_minutes: number; consumed_minutes: number; reserved_minutes: number }
 export type Settings = User

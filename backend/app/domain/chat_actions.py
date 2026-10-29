@@ -3,6 +3,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.agents.schemas import TutorProposal
+from app.agents.schemas_v3 import TutorProposalV3
 from app.db.models import Goal, Operation
 from app.domain import commands
 from app.domain.common import DomainError, dispatch, new_operation, owned, version
@@ -10,7 +11,12 @@ from app.domain.common import DomainError, dispatch, new_operation, owned, versi
 
 async def apply_chat_actions(db, user, stream, source, result):
     try:
-        actions = TutorProposal.model_validate({k: v for k, v in result.items() if k != "agent_history"}).actions
+        # Only the workflow's recognized version marker selects the newer strict
+        # provider schema. Unknown metadata must still fail on both old and new paths.
+        teaching = result.get("teaching_version") == "teaching-v1"
+        metadata = {"agent_history", "teaching_version"} if teaching else {"agent_history"}
+        schema = TutorProposalV3 if teaching else TutorProposal
+        actions = schema.model_validate({k: v for k, v in result.items() if k not in metadata}).actions
     except ValidationError:
         raise DomainError("invalid_chat_actions", "对话操作格式无效，未执行修改", 422) from None
     receipts = []

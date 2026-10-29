@@ -158,6 +158,12 @@ Coder 需要支持 `WorkspaceService` 的自研节点，不能只提供旧的一
 
 `VOICE_ENABLED` 只控制模块可用性，默认配置仍未启用；可用它停用全部语音。默认单次 300 秒、每日 900 秒、空闲 60 秒和每用户并发 1，可通过 `.env.local` 中对应变量下调。语音使用独立供应商计费，不受聊天网关月度预算控制，目前不提供金额估算。连接退出后保留字幕，音频默认不保存；断线后需用户手动重新开始。
 
+## 10. 教学能力与学习报告
+
+第四阶段无需新服务、供应商密钥、Python依赖升级或数据库迁移，仍使用 `0008_voice`。同时更新 API/Worker/Dispatcher/Web：新操作采用V3 Agent，旧V1/V2活动仍注册供历史重放。教学方法是版本固定的指令包，通过官方deferred Capability按需加载；没有读取本机目录或执行第三方SKILL的入口。
+
+历史检索只读当前对话的公开旧消息，使用官方Harness搜索并补中文原文匹配；窗口压缩固定保留本次请求，工具输出使用截断模式，无额外摘要模型。原模型请求/Token额度保持不变。自测练习与学习报告不调用模型；练习反馈只作学习参考，报告入口位于目标详情“下载学习报告”，包括已结束目标。
+
 浏览器音频需要 localhost 或 HTTPS，并由用户点击授权。HTTPS 部署的 Nginx TLS 模板已包含同一 WebSocket 代理；前置 TLS 代理也须透传 Upgrade、Origin、Cookie 和原始 Host。不能把 WebM/Opus 直接作为 PCM 发送。麦克风本地测试只在浏览器内录制 3 秒并回放，随后释放设备。
 
 官方参考：[百炼兼容接口](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)、[智谱接口](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)、[方舟接口](https://www.volcengine.com/docs/82379/1330310)、[Hindsight 配置](https://hindsight.vectorize.io/developer/configuration)、[Temporal 自托管](https://docs.temporal.io/self-hosted-guide/deployment)。
