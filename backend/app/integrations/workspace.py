@@ -1,6 +1,7 @@
 """True remote POSIX WorkspaceBackend. No workspace path ever touches the host filesystem."""
 
 import asyncio
+import errno
 import hashlib
 import json
 import math
@@ -20,6 +21,8 @@ from app.integrations.workspace_proto import workspace_pb2 as pb, workspace_pb2_
 PROVIDER = "lazyx-workspace-v1"
 MAX_FILE = 8 * 1024 * 1024
 MAX_OUTPUT = 1024 * 1024
+CLOSE_TIMEOUT_SECONDS = 90.0
+CLOSE_POLL_SECONDS = 0.5
 
 
 class WorkspaceProtocolError(RuntimeError):
@@ -33,14 +36,21 @@ def _path(path, *, normalize=True):
 
 
 def _file_error(code, path):
-    errors = {"NOT_FOUND": FileNotFoundError, "MISSING": FileNotFoundError,
-              "NOT_DIRECTORY": NotADirectoryError, "IS_DIRECTORY": IsADirectoryError,
-              "PERMISSION_DENIED": PermissionError, "ALREADY_EXISTS": FileExistsError,
-              "INVALID_PATH": ValueError, "INVALID_ARGUMENT": ValueError,
-              "SYMLINK_LOOP": OSError,
-              "UNAVAILABLE": WorkspaceUnavailableError, "WORKSPACE_CLOSED": WorkspaceUnavailableError}
-    if code:
-        raise errors.get(code, OSError)(f"Workspace file operation failed: {code}", path)
+    if not code:
+        return
+    if code in {"INVALID_PATH", "INVALID_ARGUMENT"}:
+        raise ValueError(f"Workspace file operation failed: {code}")
+    if code in {"UNAVAILABLE", "WORKSPACE_CLOSED"}:
+        raise WorkspaceUnavailableError(f"Workspace file operation failed: {code}")
+    numbers = {"NOT_FOUND": errno.ENOENT, "MISSING": errno.ENOENT,
+               "NOT_DIRECTORY": errno.ENOTDIR, "IS_DIRECTORY": errno.EISDIR,
+               "PERMISSION_DENIED": errno.EACCES, "ALREADY_EXISTS": errno.EEXIST,
+               "SYMLINK_LOOP": errno.ELOOP, "LIMIT_EXCEEDED": errno.EFBIG,
+               "UNSUPPORTED_FILE_TYPE": errno.EOPNOTSUPP, "IO_ERROR": errno.EIO}
+    safe_code = code if code in numbers else "IO_ERROR"
+    # The first argument must be an integer errno, not the error message. Core's durable
+    # workspace transport serializes these OS fields and reconstructs the builtin subclass.
+    raise OSError(numbers[safe_code], f"Workspace file operation failed: {safe_code}", path)
 
 
 class SandboxWorkspaceBackend:
@@ -93,7 +103,8 @@ class SandboxWorkspaceBackend:
                 if error.code() in {grpc.StatusCode.NOT_FOUND, grpc.StatusCode.FAILED_PRECONDITION}:
                     raise WorkspaceUnavailableError("Remote workspace is unavailable") from None
                 if error.code() == grpc.StatusCode.PERMISSION_DENIED:
-                    raise PermissionError("Remote workspace operation denied") from None
+                    raise PermissionError(errno.EACCES, "Remote workspace operation denied",
+                                          getattr(request, "path", None)) from None
                 if error.code() == grpc.StatusCode.INVALID_ARGUMENT:
                     raise ValueError("Invalid remote workspace request") from None
                 if error.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
@@ -315,7 +326,29 @@ class SandboxWorkspaceBackend:
         return files
 
     async def close(self):
-        remote = await self._rpc("Close", pb.WorkspaceRef(workspace_id=self.workspace_id), timeout=90)
-        if remote.workspace_id != self.workspace_id or not remote.cleanup_done:
-            raise WorkspaceProtocolError("Workspace cleanup is not confirmed")
-        self._ready = False
+        # A completed Close RPC can legitimately report that cleanup needs another attempt.
+        # Keep one absolute deadline across all calls; false is never an acknowledgement.
+        deadline = anyio.current_time() + CLOSE_TIMEOUT_SECONDS
+        reference = pb.WorkspaceRef(workspace_id=self.workspace_id)
+        method = "Close"
+        try:
+            with anyio.fail_after(CLOSE_TIMEOUT_SECONDS):
+                while True:
+                    remote = await self._rpc(method, reference,
+                        timeout=max(0.001, deadline - anyio.current_time()))
+                    if (remote.workspace_id != self.workspace_id
+                            or (remote.state, remote.cleanup_done) not in {("closing", False), ("closed", True)}):
+                        raise WorkspaceProtocolError("Invalid workspace cleanup state")
+                    self._ready, self._attach = False, True
+                    if remote.cleanup_done:
+                        if self._opening_task is not None and not self._opening_task.done():
+                            self._opening_task.cancel()
+                            await asyncio.gather(self._opening_task, return_exceptions=True)
+                        self._opening_task = None
+                        return
+                    await anyio.sleep(CLOSE_POLL_SECONDS)
+                    # Status observes asynchronous progress; another Close retries a failed
+                    # cleanup attempt after the node has kept its original stable identity.
+                    method = "Status" if method == "Close" else "Close"
+        except TimeoutError:
+            raise WorkspaceTimeoutError("Workspace cleanup confirmation timed out") from None
