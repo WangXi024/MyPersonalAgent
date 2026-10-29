@@ -164,6 +164,16 @@ Coder 需要支持 `WorkspaceService` 的自研节点，不能只提供旧的一
 
 历史检索只读当前对话的公开旧消息，使用官方Harness搜索并补中文原文匹配；窗口压缩固定保留本次请求，工具输出使用截断模式，无额外摘要模型。原模型请求/Token额度保持不变。自测练习与学习报告不调用模型；练习反馈只作学习参考，报告入口位于目标详情“下载学习报告”，包括已结束目标。
 
+## 11. 样例验证与资料解析
+
+第五阶段需要先备份并迁移至 `0009_verification`，同时更新API/Worker/Dispatcher/Web。默认 `VERIFICATION_ENABLED=false`、`MATERIAL_ENABLED=false`；确认自研sandbox节点已支持WorkspaceService及 `files` 环境后再分别启用。两个功能不需要模型密钥，不向sandbox注入聊天/语音凭据，也不读取主机的动态Skills。
+
+学习页的“样例验证”先由用户检查并确认输入/预期输出规则，再另行运行当前保存的单文件Python提交；每例10秒/256MiB、每批最多6例、最近24小时5批/每用户1批在途。结果与AI评语分开，记录规则版本和代码SHA256，只证明确认的样例，不能自动提升学习状态。每例使用独立工作区；未知清理继续占在途额度，24小时清理重试不重跑代码。
+
+`/materials` 独立资料页支持PDF/DOCX文字提取，先按节点当前的1MiB输入硬限交付；原作业附件10MiB流程保留。超限提示拆分，不回退主机解析。PDF最多30页，无OCR/加密文档支持；预览/下载限长，提取文本是不可信资料。编辑摘录后明确加入普通消息草稿，再由用户发送。默认最近24小时5次、同用户1个在途、执行30秒/总期限240秒，未知状态不重复创建解析任务。
+
+新学习操作采用V4 Agent引用当前有效的样例验证摘要；V1–V3活动继续注册供历史回放。进度与报告只列当前版本匹配的最近最多40条可信完整样例记录，仍区分实际执行与AI审阅。
+
 浏览器音频需要 localhost 或 HTTPS，并由用户点击授权。HTTPS 部署的 Nginx TLS 模板已包含同一 WebSocket 代理；前置 TLS 代理也须透传 Upgrade、Origin、Cookie 和原始 Host。不能把 WebM/Opus 直接作为 PCM 发送。麦克风本地测试只在浏览器内录制 3 秒并回放，随后释放设备。
 
 官方参考：[百炼兼容接口](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)、[智谱接口](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)、[方舟接口](https://www.volcengine.com/docs/82379/1330310)、[Hindsight 配置](https://hindsight.vectorize.io/developer/configuration)、[Temporal 自托管](https://docs.temporal.io/self-hosted-guide/deployment)。

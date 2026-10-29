@@ -27,7 +27,7 @@ export function GoalDetailPage() {
   const historicalTasks = tasks.filter(task => !currentTasks.includes(task) && !carriedTasks.includes(task))
   const isCurrentEvaluation = (evaluation: typeof evaluations[number]) => evaluation.valid && tasks.some(task => task.active_submission_id === evaluation.submission_id && !['cancelled', 'skipped'].includes(task.status))
   const proposed = plans.filter(plan => plan.status === 'proposed')
-  const running = operations.filter(operation => !['sandbox_execution', 'coding_run'].includes(operation.kind) && ['accepted', 'running', 'waiting_user', 'failed'].includes(operation.status))
+  const running = operations.filter(operation => !['sandbox_execution', 'coding_run', 'verification_run', 'material_parse', 'material_cancel', 'verification_cancel'].includes(operation.kind) && ['accepted', 'running', 'waiting_user', 'failed'].includes(operation.status))
   const activePlan = plans.find(plan => plan.status === 'active')
   const verified = milestones.filter(milestone => milestone.status === 'evidence_available').length
   return <><Link className="back-link" to="/goals"><ArrowLeft size={15} />全部目标</Link><PageHeading title={goal.title} description={goal.outcome} action={<Status value={goal.status} />} /><ErrorNotice error={error || action.error} retry={error ? reload : undefined} />

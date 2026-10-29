@@ -357,6 +357,77 @@ class CodingArtifact(Entity, Base):
     __table_args__ = (UniqueConstraint("run_id", "filename"),)
 
 
+class TestContract(Entity, Base):
+    __tablename__ = "test_contracts"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    requirements_version: Mapped[int] = mapped_column(Integer)
+    requirements_hash: Mapped[str] = mapped_column(String(64))
+    contract_hash: Mapped[str] = mapped_column(String(64))
+    comparator: Mapped[str] = mapped_column(String(30))
+    cases: Mapped[list] = mapped_column(J)
+    idempotency_key: Mapped[str] = mapped_column(String(160))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"), UniqueConstraint("task_id", "version"))
+
+
+class VerificationRun(Entity, Base):
+    __tablename__ = "verification_runs"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), index=True)
+    attachment_id: Mapped[str | None] = mapped_column(ForeignKey("attachments.id"))
+    operation_id: Mapped[str] = mapped_column(ForeignKey("operations.id"), unique=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("test_contracts.id"))
+    contract_hash: Mapped[str] = mapped_column(String(64))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    source: Mapped[bytes] = mapped_column(LargeBinary)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    goal_revision: Mapped[int] = mapped_column(Integer)
+    task_state_version: Mapped[int] = mapped_column(Integer)
+    requirements_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(30), default="accepted")
+    stage: Mapped[str] = mapped_column(String(30), default="queued")
+    tests_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    cleanup_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class VerificationCase(Entity, Base):
+    __tablename__ = "verification_cases"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("verification_runs.id"), index=True)
+    index: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(100))
+    workspace_id: Mapped[str] = mapped_column(String(64), unique=True)
+    command_id: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    reason: Mapped[str | None] = mapped_column(String(60))
+    open_attempted: Mapped[bool] = mapped_column(Boolean, default=False)
+    workspace_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    seed_saved: Mapped[bool] = mapped_column(Boolean, default=False)
+    command_attempted: Mapped[bool] = mapped_column(Boolean, default=False)
+    result_saved: Mapped[bool] = mapped_column(Boolean, default=False)
+    cleanup_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    stdout: Mapped[bytes] = mapped_column(LargeBinary, default=bytes)
+    stderr: Mapped[bytes] = mapped_column(LargeBinary, default=bytes)
+    output_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    output_truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    utf8_valid: Mapped[bool | None] = mapped_column(Boolean)
+    timed_out: Mapped[bool] = mapped_column(Boolean, default=False)
+    matched: Mapped[bool | None] = mapped_column(Boolean)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (UniqueConstraint("run_id", "index"),)
+
+
 class Evaluation(Entity, Base):
     __tablename__ = "evaluations"
     submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), index=True)

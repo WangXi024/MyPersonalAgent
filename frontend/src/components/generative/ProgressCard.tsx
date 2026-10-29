@@ -9,7 +9,7 @@ export function ProgressCard({ block, timezone }: { block: ProgressBlock; timezo
     <header className="genui-heading"><ChartNoAxesColumnIncreasing size={16} aria-hidden="true" /><h3>{block.title}</h3></header>
     <p className="genui-progress-goal">{value.title}<span>{statusLabels[value.goal_status]}</span></p>
     <dl className="genui-progress-counts">{counts.map(([label, count]) => <div key={label}><dt>{label}</dt><dd>{count}</dd></div>)}</dl>
-    <div className="genui-progress-evidence"><p>知识记录 {value.skills.total} 项，其中待复习 {value.skills.needs_review} 项。</p><p>当前提交的有效 AI 审阅 {value.evidence.ai_review} 条；已验证测试证据 {value.evidence.verified_tests} 条。</p></div>
-    <p className="genui-footnote"><time dateTime={value.as_of}>截至 {timeLabel(value.as_of, timezone)}</time>的记录快照，任务统计来自当时的当前计划，包含已跳过任务。AI 审阅条数和任务完成数不代表知识掌握率。</p>
+    <div className="genui-progress-evidence"><p>知识记录 {value.skills.total} 项，其中待复习 {value.skills.needs_review} 项。</p><p>当前提交的有效 AI 审阅 {value.evidence.ai_review} 条；已完成比较的样例验证记录 {value.evidence.verified_tests} 条，包含符合与不符合的结果。</p></div>
+    <p className="genui-footnote"><time dateTime={value.as_of}>截至 {timeLabel(value.as_of, timezone)}</time>的记录快照，任务统计来自当时的当前计划，包含已跳过任务。样例验证记录仅统计当时适用的最近最多 40 条。AI 审阅条数、样例验证记录和任务完成数不代表知识掌握率。</p>
   </section>
 }

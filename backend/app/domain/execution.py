@@ -394,6 +394,9 @@ async def load_context(operation_id: str) -> dict:
                         for item in goals})
         if goal:
             targets[goal.id] = {"status": goal.status, "control_revision": goal.control_revision}
+        from app.domain.verification import applicable_evidence
+
+        verified_samples = await applicable_evidence(db, user.id, goal.id) if goal else []
         return {
             "operation": {**public_operation(op), "payload": model_payload, "versions": op.versions},
             "user": public_user(user),
@@ -406,6 +409,7 @@ async def load_context(operation_id: str) -> dict:
             "tasks": task_data,
             "submission": serialize(submission) if submission else None,
             "code_executions": code_executions,
+            "verified_sample_tests": verified_samples[:3],
             "attachments": attachments,
             "budgets": budgets,
             "skill_progress": [serialize(item) for item in progress],

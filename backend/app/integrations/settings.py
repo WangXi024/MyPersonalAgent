@@ -40,6 +40,8 @@ class RuntimeSettings(BaseSettings):
     coding_deadline_seconds: int = Field(1800, ge=120, le=1800)
     coding_max_daily_runs: int = Field(5, ge=1, le=50)
     coding_max_concurrent_per_user: int = Field(1, ge=1, le=3)
+    verification_enabled: bool = False
+    material_enabled: bool = False
     voice_enabled: bool = True
     voice_credential_key_path: Path = Path("/run/secrets/voice_credentials_key")
     voice_max_session_seconds: int = Field(300, ge=30, le=300)

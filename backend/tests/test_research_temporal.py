@@ -11,7 +11,7 @@ import pytest
 pytestmark = pytest.mark.skipif(not os.getenv("TEMPORAL_TEST_ADDRESS"), reason="Set TEMPORAL_TEST_ADDRESS")
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 async def test_research_ui_activities_and_legacy_replay(database, monkeypatch, version):
     from pydantic import SecretStr
     from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
@@ -70,6 +70,8 @@ async def test_research_ui_activities_and_legacy_replay(database, monkeypatch, v
         if marker == "learning-research-ui-v1" and version == 1:
             return False
         if marker == "learning-teaching-ui-v1" and version < 3:
+            return False
+        if marker == "learning-sample-evidence-v1" and version < 4:
             return False
         return original_patched(marker)
 

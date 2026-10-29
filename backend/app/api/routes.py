@@ -561,7 +561,9 @@ async def cancel_operation(operation_id: str, user=Depends(current_user)):
                     dedupe_key=f"operation-cancel:{op.id}",
                     payload={
                         "type": {"coding_run": "coding_run_cancelled",
-                                 "sandbox_execution": "sandbox_execution_cancelled"}.get(op.kind, "operation_cancelled"),
+                                 "sandbox_execution": "sandbox_execution_cancelled",
+                                 "verification_run": "verification_run_cancelled",
+                                 "material_parse": "material_parse_cancelled"}.get(op.kind, "operation_cancelled"),
                         "user_id": user.id,
                         "goal_id": op.goal_id,
                         "operation_id": op.id,

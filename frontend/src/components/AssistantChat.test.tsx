@@ -28,6 +28,19 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 describe('direct Agent conversation', () => {
+  it('imports an explicitly chosen material excerpt into the ordinary composer without sending it', async () => {
+    const user = userEvent.setup()
+    data.conversations = [globalConversation]
+    const command = vi.spyOn(api, 'command').mockResolvedValue({ operation_id: 'material-message', status: 'accepted' })
+    render(<MemoryRouter initialEntries={[{ pathname: '/assistant', state: { materialDraft: '请帮我解释这段资料：变量是命名的引用。' } }]}><Assistant /></MemoryRouter>)
+    const editor = screen.getByLabelText('给学习伙伴发消息')
+    expect(editor).toHaveValue('请帮我解释这段资料：变量是命名的引用。')
+    await screen.findByRole('option', { name: '百炼 已配置模型' })
+    expect(command).not.toHaveBeenCalled()
+    await user.type(editor, ' 请举例。')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(command).toHaveBeenCalledWith(`/conversations/${globalConversation.id}/messages`, { content: '请帮我解释这段资料：变量是命名的引用。 请举例。', research_requested: false }, expect.any(String))
+  })
   it('refreshes practice feedback for an older message from its scoped operation after an event revision', async () => {
     data.conversations = [globalConversation]
     vi.mocked(api.messages).mockResolvedValue({ items: [{ id: 'quiz-message', seq: 1, role: 'assistant', type: 'assistant_reply', operation_id: 'tutor-1', content: '先做一个不计学习进度的小练习。', ui_components: [quizBlock], created_at: quizAttempt.submitted_at }], last_seq: 1, read_seq: 0, has_more: false })

@@ -73,7 +73,7 @@ function progress(value: unknown): value is ProgressSnapshot {
   return integer(tasks.total) && states.every(key => integer(tasks[key]))
     && states.reduce((sum, key) => sum + (tasks[key] as number), 0) === tasks.total
     && integer(value.skills.total) && integer(value.skills.needs_review) && value.skills.needs_review <= value.skills.total
-    && integer(value.evidence.ai_review) && value.evidence.verified_tests === 0
+    && integer(value.evidence.ai_review) && integer(value.evidence.verified_tests)
 }
 
 /** Keep transport data outside React props until a bounded, known component has been validated. */

@@ -16,6 +16,8 @@ from app.api.voice import router as voice_router
 from app.api.voice_socket import router as voice_socket_router
 from app.api.practice import router as practice_router
 from app.api.reports import router as reports_router
+from app.api.verification import router as verification_router
+from app.api.materials import router as materials_router
 from app.db.session import SessionFactory, engine
 from app.domain.common import DomainError
 
@@ -28,6 +30,8 @@ async def lifespan(app):
 
 app = FastAPI(title="Learning Personal Agent", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router, prefix="/api/v1")
+# Specific task subresources precede the legacy /tasks/{id}/{action} route.
+app.include_router(verification_router, prefix="/api/v1")
 app.include_router(router, prefix="/api/v1")
 app.include_router(model_configs_router, prefix="/api/v1")
 app.include_router(sandbox_router, prefix="/api/v1")
@@ -36,6 +40,7 @@ app.include_router(voice_router, prefix="/api/v1")
 app.include_router(voice_socket_router, prefix="/api/v1")
 app.include_router(practice_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
+app.include_router(materials_router, prefix="/api/v1")
 
 
 @app.middleware("http")
@@ -81,7 +86,7 @@ async def ready(request: Request):
     try:
         async with SessionFactory() as db:
             version = await db.scalar(text("SELECT version_num FROM alembic_version"))
-            if version != "0008_voice":
+            if version != "0009_verification":
                 return error(request, "migration_required", "数据库迁移未完成", 503)
         return {"status": "ready", "database": "ready", "migration": version}
     except SQLAlchemyError:

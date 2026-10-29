@@ -50,6 +50,8 @@ DISPLAY_V3 = TypeAdapter(list[DisplayProposalV3])
 
 
 async def progress_snapshot(db, op):
+    from app.domain.verification import applicable_evidence
+
     goal = await db.get(Goal, op.goal_id) if op.goal_id else None
     if not goal or goal.user_id != op.user_id:
         raise DomainError("invalid_progress_scope", "进度组件仅用于当前目标对话", 422)
@@ -67,10 +69,11 @@ async def progress_snapshot(db, op):
     evaluation_ids = list(await db.scalars(applicable)) if goal.active_plan_id else []
     skills = list(await db.scalars(select(SkillProgress).where(SkillProgress.user_id == op.user_id,
         SkillProgress.goal_id == goal.id, SkillProgress.evaluation_id.in_(evaluation_ids)))) if evaluation_ids else []
+    verified = await applicable_evidence(db, op.user_id, goal.id)
     return {"goal_id": goal.id, "title": goal.title, "goal_status": goal.status,
         "goal_revision": goal.control_revision, "plan_id": goal.active_plan_id, "as_of": now().isoformat(),
         "tasks": tasks, "skills": {"total": len(skills), "needs_review": sum(item.status == "needs_review" for item in skills)},
-        "evidence": {"ai_review": len(evaluation_ids), "verified_tests": 0}}
+        "evidence": {"ai_review": len(evaluation_ids), "verified_tests": len(verified)}}
 
 
 async def build_v3_ui(db, op, proposals, sources):

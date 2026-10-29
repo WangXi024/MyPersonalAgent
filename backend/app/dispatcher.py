@@ -28,6 +28,51 @@ class ConversationOrderPending(Exception):
 async def deliver(client: Client, item: dict):
     payload = dict(item["payload"])
     settings = runtime_settings()
+    if payload.get("type") in {"verification_run", "verification_run_cancelled"}:
+        from app.workflows.verification import VerificationWorkflow
+
+        workflow_id = f"verification:{payload['operation_id']}"
+        if payload["type"] == "verification_run_cancelled":
+            try:
+                await client.get_workflow_handle(workflow_id).signal(VerificationWorkflow.cancel)
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+                # A stopped workflow may still have unconfirmed cleanup. The
+                # persisted terminal state only allows reconciliation, never
+                # opening a replacement workspace or starting another command.
+                try:
+                    await client.start_workflow(VerificationWorkflow.run, payload["operation_id"], id=workflow_id,
+                        task_queue=settings.temporal_task_queue, execution_timeout=timedelta(seconds=600 + 86400 + 180),
+                        id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE)
+                except WorkflowAlreadyStartedError:
+                    pass
+            return
+        try:
+            await client.start_workflow(VerificationWorkflow.run, payload["operation_id"], id=workflow_id,
+                task_queue=settings.temporal_task_queue, execution_timeout=timedelta(seconds=600 + 86400 + 180),
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY)
+        except WorkflowAlreadyStartedError:
+            pass
+        return
+    if payload.get("type") in {"material_parse", "material_parse_cancelled"}:
+        from app.workflows.materials import MaterialParseWorkflow
+
+        workflow_id = f"material:{payload['operation_id']}"
+        if payload["type"] == "material_parse_cancelled":
+            try:
+                await client.get_workflow_handle(workflow_id).signal(MaterialParseWorkflow.cancel)
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+            return
+        try:
+            await client.start_workflow(MaterialParseWorkflow.run, payload["operation_id"], id=workflow_id,
+                task_queue=settings.temporal_task_queue, execution_timeout=timedelta(seconds=420),
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY)
+        except WorkflowAlreadyStartedError:
+            pass
+        return
     if payload.get("type") in {"coding_run", "coding_run_cancelled"}:
         workflow_id = f"coding-{payload['operation_id']}"
         if payload["type"] == "coding_run_cancelled":

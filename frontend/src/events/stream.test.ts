@@ -14,6 +14,26 @@ class FakeEventSource {
 }
 
 describe('persistent event stream', () => {
+  it('keeps material operation status current after leaving the polling page and deduplicates updates', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const onEvent = vi.fn(), close = openEventStream(20, onEvent, vi.fn(), vi.fn(), vi.fn())
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('material.updated', { seq: 21, type: 'material.updated', operation_id: 'material-1' })
+    source.emit('material.updated', { seq: 21, type: 'material.updated', operation_id: 'material-1' })
+    expect(onEvent).toHaveBeenCalledOnce()
+    expect(onEvent.mock.calls[0][0].operation_id).toBe('material-1')
+    close(); vi.unstubAllGlobals()
+  })
+  it('refreshes confirmed test rules and actual verification results from persisted events', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const onEvent = vi.fn(), close = openEventStream(10, onEvent, vi.fn(), vi.fn(), vi.fn())
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('test_contract.updated', { seq: 11, type: 'test_contract.updated' })
+    source.emit('verification.updated', { seq: 12, type: 'verification.updated' })
+    source.emit('verification.updated', { seq: 12, type: 'verification.updated' })
+    expect(onEvent.mock.calls.map(([event]) => event.seq)).toEqual([11, 12])
+    close(); vi.unstubAllGlobals()
+  })
   it('delivers persisted practice-attempt events once without creating a learning-state event', () => {
     vi.stubGlobal('EventSource', FakeEventSource)
     const onEvent = vi.fn(), close = openEventStream(2, onEvent, vi.fn(), vi.fn(), vi.fn())

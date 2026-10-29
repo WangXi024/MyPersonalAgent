@@ -139,7 +139,19 @@ async def fetch_learning_resource(ctx: RunContext[dict], url: str) -> dict:
     return await fetch_for_operation(ctx.deps["operation"]["id"], url, ctx.tool_call_id)
 
 
-def build_agent(kind: str, output_type: type, *, research_ui: bool = False, teaching: bool = False) -> Agent:
+SAMPLE_EVIDENCE_INSTRUCTIONS = """
+verified_sample_tests来自应用保存的、当前适用的用户确认样例验证记录，最多提供最近3条。
+tests_verified=true表示可信执行回执完整；status=passed仅表示这些已确认的输入输出样例通过，
+status=failed表示真实样例验证未通过。不要把运行成功、自述通过或Coder生成测试冒充这类记录。
+本Agent仍不执行代码，assessment证据类型仍为ai_review；可以引用实际样例记录，但不能据此声称
+所有验收条件通过、任务已完成或知识已掌握。无记录时不能声称程序测试通过；进度以当前数据库为准。
+"""
+
+
+def build_agent(kind: str, output_type: type, *, research_ui: bool = False, teaching: bool = False,
+                sample_evidence: bool = False) -> Agent:
+    if sample_evidence:
+        teaching = True
     if teaching:
         research_ui = True
     from app.agents.teaching import TEACHING_INSTRUCTIONS, teaching_capabilities
@@ -154,10 +166,11 @@ def build_agent(kind: str, output_type: type, *, research_ui: bool = False, teac
     )
     agent = Agent(
         BudgetedModel(model),
-        name=f"learning_{kind}_v3" if teaching else f"learning_{kind}_{'v2' if research_ui else 'v1'}",
+        name=f"learning_{kind}_v4" if sample_evidence else f"learning_{kind}_v3" if teaching else f"learning_{kind}_{'v2' if research_ui else 'v1'}",
         output_type=output_type,
         deps_type=dict,
-        instructions=INSTRUCTIONS + (UI_INSTRUCTIONS if research_ui else "") + (TEACHING_INSTRUCTIONS if teaching else ""),
+        instructions=INSTRUCTIONS + (UI_INSTRUCTIONS if research_ui else "") + (TEACHING_INSTRUCTIONS if teaching else "")
+                     + (SAMPLE_EVIDENCE_INSTRUCTIONS if sample_evidence else ""),
         retries=2,
         model_settings={"max_tokens": settings.model_output_tokens, "timeout": 600 if kind in {"plan", "tutor"} else 90},
         capabilities=[TemporalDurability(activity_config={
@@ -212,6 +225,13 @@ TEACHING_AGENTS = {
     "tutor": build_agent("tutor", TutorProposalV3, teaching=True),
     "assessment": build_agent("assessment", AssessmentProposalV3, teaching=True),
     "recommendation": build_agent("recommendation", RecommendationProposalV3, teaching=True),
+}
+
+SAMPLE_EVIDENCE_AGENTS = {
+    "plan": build_agent("plan", PlanProposalV3, sample_evidence=True),
+    "tutor": build_agent("tutor", TutorProposalV3, sample_evidence=True),
+    "assessment": build_agent("assessment", AssessmentProposalV3, sample_evidence=True),
+    "recommendation": build_agent("recommendation", RecommendationProposalV3, sample_evidence=True),
 }
 
 

@@ -89,6 +89,8 @@ def _applicable(row, current_plan_id):
 
 
 async def render_learning_report(user_id: str, goal_id: str) -> LearningReport:
+    from app.domain.verification import applicable_evidence
+
     try:
         canonical_id = str(UUID(goal_id))
     except (ValueError, AttributeError):
@@ -180,6 +182,7 @@ async def render_learning_report(user_id: str, goal_id: str) -> LearningReport:
             .where(CodingRun.user_id == user_id, CodingRun.goal_id == goal.id,
                    Submission.task_id == Task.id, *receipt_scope)
             .order_by(CodingRun.created_at.desc(), CodingRun.id.desc()).limit(20))).all()
+        verified = await applicable_evidence(db, user_id, goal.id)
 
     doc = _Document()
     doc.add("# 学习记录报告")
@@ -244,6 +247,14 @@ async def render_learning_report(user_id: str, goal_id: str) -> LearningReport:
         doc.add(f"Coder {_inline(item.id)}；{'当前提交回执' if current else '历史回执'}；"
                 f"status={_inline(item.status)}；cleanup_done={str(item.cleanup_done).lower()}；"
                 f"时间：{_stamp(item.created_at)}")
+    doc.add("## 当前适用的样例验证\n\n最多列最近40条可信完整运行记录，绑定当前计划、当前提交、任务要求和最新确认规则。"
+            "通过只表示确认的这些输入输出样例通过；失败也是实际测试证据。缺失退出码、截断、未知回执不列入此处。"
+            "这些记录不会自动完成任务或证明全部知识已掌握，不导出代码、样例输入/预期答案和程序日志。")
+    for item in verified:
+        doc.add(f"验证 {_inline(item['id'])}；任务 {_inline(item['task_id'])}；"
+                f"提交 {_inline(item['submission_id'])}；样例结果：{'通过' if item['passed'] else '未通过'}；"
+                f"tests_verified=true；规则摘要 {_inline(item['contract_hash'])}；"
+                f"代码SHA256 {_inline(item['source_sha256'])}；时间 {_stamp(item['created_at'])}")
     doc.add("## 报告范围\n\n各明细采用固定条数上限，文本摘录最多 1600 字符（任务要求 600），"
             "超长字段标记“内容已截断”，整份文件最多 512 KiB。未列出的记录不表示不存在。"
             "报告是导出时的只读快照；下载不会修改任务、评估、学习预算或目标状态。")

@@ -163,3 +163,40 @@ V3 retains `resource_list` and `checklist`, adding:
 `POST /operations/{operation_id}/quizzes/{quiz_id}/attempts` requires login, CSRF and `Idempotency-Key`. Body is `{answers: [{question_id: "q1", choice_id: "a"}]}` with exactly one valid choice for every question. It returns the persisted attempt (`attempt_number`, answers, correct count, feedback and `practice_only=true`). Repeating the same key/content returns the same attempt, conflicting content returns 409, a sixth distinct attempt returns 429, and another user's operation returns 404. Per-user transaction locking protects parallel retries. `quiz.attempted` refreshes the owned operation; existing public message pagination continues unchanged. Practice never modifies Task, Evaluation, study-time budgets or mastery. Private answer records, request keys and history audit hashes are excluded from public operation responses.
 
 `GET /goals/{goal_id}/report.md` downloads an owned UTF-8 Markdown attachment, including ended goals. It reads actual bounded database task/submission/evaluation/receipt records without a model; labels current versus historical evidence and preserves `ai_review`/unverified execution distinctions. No chat, voice transcripts, memory, credentials, model traces, attachments or program logs are exported. Limits: 512 KiB overall, 40 current/20 historical task details and 40 recent submissions/evaluations. User/model text is escaped or indented as literal text. Response uses an ASCII UUID filename, `private, no-store` and `nosniff`; unauthenticated requests return 401 and foreign/malformed IDs return 404. No schema migration is added.
+
+## User-confirmed programming samples
+
+These endpoints provide deterministic evidence about a finite set of user-confirmed Python stdin/stdout examples. They do not complete a Task, write an Evaluation, or promote mastery. A model cannot confirm rules or set `passed`/`tests_verified` through these APIs. The old submission execution and Coder receipts retain their existing meaning.
+
+| Endpoint | Contract |
+| --- | --- |
+| `POST /tasks/{id}/test-contracts` | Explicit `confirm:true`, `expected_version` (task state), `expected_goal_revision`, `requirements_version`, `comparator` and `cases`. Creates an immutable confirmed version (201). |
+| `GET /tasks/{id}/test-contracts` | Owned task's most recent rules; only the latest applicable version can start a run. |
+| `POST /submissions/{id}/verification-runs` | `expected_version`, `expected_goal_revision`, `contract_id`, `expected_contract_hash`, `attachment_id` (null for saved body); returns the persisted run (202). |
+| `GET /goals/{id}/verification` | Owned goal's confirmed contracts and recent runs. |
+| `GET /verification-runs/{id}` | Frozen source SHA-256, rule hash, status, real per-case receipts and cleanup acknowledgement. |
+| `POST /verification-runs/{id}/cancel` | Empty strict object; persists cancellation before signaling the workflow. |
+
+Mutations require login, CSRF and an `Idempotency-Key`. Each rule has 1–6 cases `{name, stdin, expected_stdout}`; text must be valid UTF-8 without NUL, inputs and expected outputs each at most 16 KiB. `exact` compares bytes; `normalize_newlines` only maps CRLF/CR to LF and preserves whitespace and the final newline. Rules bind task requirements version/hash, fixed 10-second case limit and 256 MiB memory. Runs additionally bind current plan, goal revision, task state, active saved submission, selected source bytes/hash and the latest contract/hash. Sources are UTF-8 Python, at most 1 MiB.
+
+Each case receives a fresh scoped workspace with only frozen `source.py` and `stdin.bin`. Expected outputs remain in the application database. A fixed command starts Python with `env -i`, `-I -S`; comparisons occur in the application against native RPC output bytes and exit metadata. A pass requires exit 0, complete non-truncated valid UTF-8 output and the confirmed comparison to match. Nonzero exits/output mismatches are failures; timeout is an actual failure. Missing exit/output, invalid UTF-8, truncation and infrastructure uncertainty are inconclusive and cannot pass. Logs are bounded at 64 KiB per stream. Printing “passed” or writing result files has no authority.
+
+Defaults: 5 runs per rolling 24 hours, one in flight per user including unconfirmed cleanup, 600-second batch deadline. Open/Start intent is committed before RPC; uncertain retries only query the original identifiers. Receipts are saved before workspace destruction. Cleanup can retry independently for 24 hours without running code again. Scope/config changes and cancellation stop pending cases. `tests_verified` means all cases have complete trusted receipts, independent of `status=passed|failed`; the public `evidence_type=program_verified` alone does not assert that boolean. Source bytes and expected outputs do not enter workflow history.
+
+`test_contract.updated` and `verification.updated` refresh UI state. Generic operation cancellation uses the dedicated verification signal, including cleanup reconciliation for a closed workflow; generic model retry rejects verification operations. `learning_*_v4` Agents, selected by `learning-sample-evidence-v1`, can cite at most three current applicable receipt summaries while assessment remains `ai_review`. V1–V3 remain registered. Progress/report evidence lists at most the latest 40 currently applicable complete runs, including both matching and failing samples; changing requirements, submission, task state, plan, goal revision or confirmed rules invalidates applicability. Migration `0009_verification` adds three tables.
+
+## Explicit learning-material parsing
+
+`POST /materials` explicitly uploads and parses one PDF or DOCX as multipart `file` (202); selecting a file in the UI performs no request. Login, CSRF and an idempotency key are required. New uploads are 1 byte..1 MiB, with a cheap header check; source SHA-256 and request identity are frozen. The existing 10 MiB submission attachment workflow is unchanged. Parsing uses the fixed offline sandbox `parse/files` implementation with generated input filenames, no model, no network, no injected environment or dynamic dependencies.
+
+| Endpoint | Contract |
+| --- | --- |
+| `GET /materials/capabilities` | Enabled flag, supported extensions, size/time/quota limits; `ocr=false`, `model_required=false`. |
+| `GET /materials` / `GET /materials/{id}` | Owned extraction status, actual phase, result persistence, ACK and cleanup flags. |
+| `POST /materials/{id}/cancel` | Idempotent stop request, including generic operation cancellation routing. |
+| `GET /materials/{id}/preview` | Bounded 32,000-character untrusted text preview and truncation/page metadata. |
+| `GET /materials/{id}/download/txt` or `/json` | Owned, hash-checked generated attachment; ASCII filename, no-store, nosniff, CSP sandbox. |
+
+PDF text is limited to 30 pages; DOCX includes paragraphs/tables. No OCR or encrypted-document support is claimed. Empty/scanned or malformed documents return a saved failure with no downloadable success artifacts. The parser output must be exactly the expected `parsed.json`, with validated transport hash, source mapping, schema, UTF-8 and at most 200,000 text characters / 2 MiB JSON. Hash-valid unusable content is durably saved as a failure before ACK; transport/source identity uncertainty is retained without ACK or duplicate parsing.
+
+Limits are 5 parses per rolling day, one in flight including unknown cleanup, a 30-second execution limit and 240-second operation deadline. Raw documents/extracted bodies stay outside Temporal; the dedicated workflow carries small metadata. Persistence precedes ACK. `material.updated` refreshes snapshots. The UI can copy or explicitly insert an edited excerpt of at most 10,000 characters into an ordinary conversation draft; it never sends that draft or changes learning evidence automatically. The feature reuses Operation/Attachment storage and needs no tables beyond the phase's verification migration.

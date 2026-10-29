@@ -9,7 +9,8 @@ import pytest
 pytestmark = pytest.mark.skipif(not os.getenv("TEMPORAL_TEST_ADDRESS"), reason="Set TEMPORAL_TEST_ADDRESS")
 
 
-async def test_teaching_load_history_compaction_and_components_replay(database, monkeypatch):
+@pytest.mark.parametrize("version", [3, 4])
+async def test_teaching_load_history_compaction_and_components_replay(database, monkeypatch, version):
     from pydantic import SecretStr
     from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
     from pydantic_ai.messages import (
@@ -19,6 +20,7 @@ async def test_teaching_load_history_compaction_and_components_replay(database, 
     from pydantic_ai.usage import RequestUsage
     from sqlalchemy import func, select
     from temporalio.client import Client
+    from temporalio import workflow
     from temporalio.worker import Replayer, Worker
 
     from app.api import routes
@@ -94,6 +96,10 @@ async def test_teaching_load_history_compaction_and_components_replay(database, 
     monkeypatch.setattr(execution, "load_context", load_context)
     monkeypatch.setattr(conversation_history, "_source", source)
     monkeypatch.setattr(OpenAIChatModel, "request", request)
+    original_patched = workflow.patched
+    if version == 3:
+        monkeypatch.setattr(workflow, "patched", lambda marker: False if marker == "learning-sample-evidence-v1"
+                            else original_patched(marker))
     client = await Client.connect(os.environ["TEMPORAL_TEST_ADDRESS"],
         namespace=os.getenv("TEMPORAL_TEST_NAMESPACE", "learning-agent"), plugins=[PydanticAIPlugin()])
     identity = f"test-teaching-{uuid4()}"
@@ -127,7 +133,8 @@ async def test_teaching_load_history_compaction_and_components_replay(database, 
     history = await client.get_workflow_handle(identity).fetch_history()
     scheduled = [event.activity_task_scheduled_event_attributes.activity_type.name for event in history.events
                  if event.HasField("activity_task_scheduled_event_attributes")]
-    assert "agent__learning_tutor_v3__model_request" in scheduled
+    assert f"agent__learning_tutor_v{version}__model_request" in scheduled
     assert any("learning-history-v1" in name for name in scheduled)
+    monkeypatch.setattr(workflow, "patched", original_patched)
     await Replayer(workflows=[OperationWorkflow], plugins=[PydanticAIPlugin()]).replay_workflow(history)
     assert len(calls) == 3 and source_reads == [1]

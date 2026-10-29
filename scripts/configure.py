@@ -114,8 +114,9 @@ def configure(env_file, check_only=False, infrastructure_only=False):
     for name, default in (("APP_PORT", "8080"), ("APP_TLS_PORT", "8443"), ("MODEL_REQUEST_TIMEOUT", "630"), ("DEPLOY_TIMEOUT", "1800")):
         if not cfg.get(name, default).isdigit() or int(cfg.get(name, default)) < 1:
             raise ValueError(name + " must be a positive integer")
-    if cfg.get("VOICE_ENABLED", "true") not in {"true", "false"}:
-        raise ValueError("VOICE_ENABLED must be true or false")
+    for name, default in (("VOICE_ENABLED", "true"), ("VERIFICATION_ENABLED", "false"), ("MATERIAL_ENABLED", "false")):
+        if cfg.get(name, default) not in {"true", "false"}:
+            raise ValueError(name + " must be true or false")
     voice_bounds = {"VOICE_MAX_SESSION_SECONDS": (300, 30, 300), "VOICE_DAILY_SECONDS": (900, 30, 7200),
                     "VOICE_IDLE_SECONDS": (60, 10, 60), "VOICE_MAX_CONCURRENT": (1, 1, 3),
                     "VOICE_LEASE_SECONDS": (20, 10, 60)}

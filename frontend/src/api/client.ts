@@ -1,5 +1,7 @@
 import type { Accepted, Bootstrap, CodingRun, CodingRunInput, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, QuizAnswer, QuizAttempt, SandboxExecution, SandboxExecutionInput, Settings, User } from './types'
 import type { VoiceCapabilities, VoiceConfig, VoiceConfigInput, VoiceSession, VoiceTicket } from '../voice/types'
+import type { TestContract, TestContractInput, VerificationData, VerificationInput, VerificationRun } from './verification'
+import type { Material, MaterialCapabilities, MaterialPreview } from './materials'
 
 let csrfToken = ''
 export class ApiError extends Error {
@@ -29,6 +31,15 @@ export async function request<T>(path: string, options: { method?: string; body?
   return payload as T
 }
 export const api = {
+  verification: (goalId: string) => request<VerificationData>(`/goals/${encodeURIComponent(goalId)}/verification`),
+  confirmTestContract: (taskId: string, body: TestContractInput, key: string) => request<TestContract>(`/tasks/${encodeURIComponent(taskId)}/test-contracts`, { method: 'POST', body, key }),
+  createVerification: (submissionId: string, body: VerificationInput, key: string) => request<VerificationRun>(`/submissions/${encodeURIComponent(submissionId)}/verification-runs`, { method: 'POST', body, key }),
+  cancelVerification: (id: string, key: string) => request<VerificationRun>(`/verification-runs/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {}, key }),
+  materialCapabilities: () => request<MaterialCapabilities>('/materials/capabilities'),
+  materials: () => request<{ items: Material[] }>('/materials'),
+  parseMaterial: (file: File, key: string) => { const body = new FormData(); body.append('file', file); return request<Material>('/materials', { method: 'POST', body, key }) },
+  cancelMaterial: (id: string, key: string) => request<Material>(`/materials/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {}, key }),
+  materialPreview: (id: string) => request<MaterialPreview>(`/materials/${encodeURIComponent(id)}/preview`),
   submitQuizAttempt: (operationId: string, quizId: string, answers: QuizAnswer[], key: string) => request<QuizAttempt>(`/operations/${encodeURIComponent(operationId)}/quizzes/${encodeURIComponent(quizId)}/attempts`, { method: 'POST', body: { answers }, key }),
   learningReport: async (goalId: string, signal?: AbortSignal) => {
     let response: Response

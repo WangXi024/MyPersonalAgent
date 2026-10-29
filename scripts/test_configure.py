@@ -70,6 +70,13 @@ class ConfigurationTests(unittest.TestCase):
                     self.run_configure()
                 self.assertFalse(Path(".secrets").exists())
 
+    def test_explicit_sandbox_feature_flags_are_strict_booleans(self):
+        for name in ("VERIFICATION_ENABLED", "MATERIAL_ENABLED"):
+            Path(".env").write_text(self.text + f"\n{name}=yes\n")
+            with self.assertRaisesRegex(ValueError, name):
+                self.run_configure()
+            self.assertFalse(Path(".secrets").exists())
+
     def test_http_cannot_bind_public_interfaces(self):
         Path(".env").write_text(self.text.replace("APP_BIND_HOST=127.0.0.1", "APP_BIND_HOST=0.0.0.0"))
         with self.assertRaisesRegex(ValueError, "loopback"):

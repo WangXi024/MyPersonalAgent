@@ -19,6 +19,11 @@ const resources: ResourceListBlock = {
 const checklist: ChecklistBlock = { type: 'checklist', id: 'steps-1', title: '阅读时试一试', items: ['解释函数参数', '写出返回值'] }
 
 describe('controlled Generative UI', () => {
+  it('accepts nonzero completed sample-verification records while keeping their pass/fail scope explicit', () => {
+    render(<GenerativeUI blocks={[{ ...progressBlock, snapshot: { ...progressBlock.snapshot, evidence: { ai_review: 2, verified_tests: 3 } } }]} />)
+    expect(screen.getByText(/已完成比较的样例验证记录 3 条，包含符合与不符合的结果/)).toBeVisible()
+    expect(screen.getByText(/不代表知识掌握率/)).toBeVisible()
+  })
   it('uses backend Unicode code point limits for practice prompts, choices and feedback', () => {
     const question = { ...quizBlock.questions[0], prompt: '😀'.repeat(1000), choices: [{ id: 'a', text: '😀'.repeat(500) }, quizBlock.questions[0].choices[1]] }
     const feedback = { ...quizAttempt, feedback: [{ ...quizAttempt.feedback[0], explanation: '😀'.repeat(2000) }, quizAttempt.feedback[1]] }
@@ -34,7 +39,7 @@ describe('controlled Generative UI', () => {
     expect(within(card).getByText('任务总数').nextElementSibling).toHaveTextContent('7')
     expect(within(card).getByText('已完成').nextElementSibling).toHaveTextContent('2')
     expect(within(card).getByText('已跳过').nextElementSibling).toHaveTextContent('1')
-    expect(within(card).getByText(/当前提交的有效 AI 审阅 2 条；已验证测试证据 0 条/)).toBeVisible()
+    expect(within(card).getByText(/当前提交的有效 AI 审阅 2 条；已完成比较的样例验证记录 0 条/)).toBeVisible()
     expect(within(card).getByText('截至 10/29 10:30')).toHaveAttribute('dateTime', progressBlock.snapshot.as_of)
     expect(within(card).getByText(/不代表知识掌握率/)).toBeVisible()
     expect(container.textContent).not.toContain('%')
@@ -44,7 +49,7 @@ describe('controlled Generative UI', () => {
     { ...progressBlock, snapshot: { ...progressBlock.snapshot, tasks: { ...progressBlock.snapshot.tasks, total: 99 } } },
     { ...progressBlock, snapshot: { ...progressBlock.snapshot, tasks: { ...progressBlock.snapshot.tasks, completed: -1 } } },
     { ...progressBlock, snapshot: { ...progressBlock.snapshot, skills: { total: 1, needs_review: 2 } } },
-    { ...progressBlock, snapshot: { ...progressBlock.snapshot, evidence: { ai_review: 2, verified_tests: 8 } } },
+    { ...progressBlock, snapshot: { ...progressBlock.snapshot, evidence: { ai_review: 2, verified_tests: -1 } } },
     { ...quizBlock, questions: [{ ...quizBlock.questions[0], choices: [{ id: 'a', text: 'a' }, { id: 'a', text: 'duplicate' }] }] },
     { ...quizBlock, attempt: { ...quizAttempt, correct_count: 2 }, attempt_count: 1 },
   ])('fails closed on malformed practice or progress data %#', block => {

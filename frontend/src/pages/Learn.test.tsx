@@ -13,6 +13,7 @@ vi.mock('../state', () => ({ useApp: () => ({ data: bootstrap, revision: 1, refr
 vi.mock('../hooks', async importOriginal => { const original = await importOriginal<typeof import('../hooks')>(); return { ...original, useGoal: () => ({ detail, error: null }) } })
 
 beforeEach(() => {
+  vi.spyOn(api, 'verification').mockResolvedValue({ contracts: [], runs: [] })
   vi.spyOn(api, 'voiceCapabilities').mockResolvedValue(voiceCapabilities)
   detail.tasks = [task]
   detail.goal = { ...bootstrap.goals[0] }

@@ -13,7 +13,9 @@ with workflow.unsafe.imports_passed_through():
     from pydantic_ai.usage import UsageLimits
     from pydantic_ai_harness.compaction import pin
 
-    from app.agents.learning import AGENTS, RESEARCH_UI_AGENTS, TEACHING_AGENTS, ChatActionRetry, build_prompt
+    from app.agents.learning import (
+        AGENTS, RESEARCH_UI_AGENTS, SAMPLE_EVIDENCE_AGENTS, TEACHING_AGENTS, ChatActionRetry, build_prompt,
+    )
     from app.workflows import activities
 
 
@@ -38,7 +40,8 @@ def model_failure_code(error):
 
 @workflow.defn
 class OperationWorkflow(PydanticAIWorkflow):
-    __pydantic_ai_agents__ = (*AGENTS.values(), *RESEARCH_UI_AGENTS.values(), *TEACHING_AGENTS.values())
+    __pydantic_ai_agents__ = (*AGENTS.values(), *RESEARCH_UI_AGENTS.values(), *TEACHING_AGENTS.values(),
+                            *SAMPLE_EVIDENCE_AGENTS.values())
 
     @workflow.run
     async def run(self, operation_id: str) -> dict:
@@ -50,7 +53,10 @@ class OperationWorkflow(PydanticAIWorkflow):
                 "operation_id": operation_id, "stage": "reasoning"}, **DB_OPTIONS)
             research_ui = workflow.patched("learning-research-ui-v1")
             teaching = research_ui and workflow.patched("learning-teaching-ui-v1")
-            agents = TEACHING_AGENTS if teaching else RESEARCH_UI_AGENTS if research_ui else AGENTS
+            sample_evidence = teaching and workflow.patched("learning-sample-evidence-v1")
+            agents = SAMPLE_EVIDENCE_AGENTS if sample_evidence else TEACHING_AGENTS if teaching else RESEARCH_UI_AGENTS if research_ui else AGENTS
+            if not sample_evidence:
+                context = {key: value for key, value in context.items() if key != "verified_sample_tests"}
             agent = agents[context["operation"]["kind"]]
             history = ModelMessagesTypeAdapter.validate_python(context.get("agent_history") or [])
             prompt = build_prompt(context)

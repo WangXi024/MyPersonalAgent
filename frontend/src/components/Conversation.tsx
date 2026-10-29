@@ -138,7 +138,7 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
     const result = await messageAction.run(JSON.stringify(body), key => api.command(`/conversations/${conversationId}/messages`, body, key))
     if (result) { setMessage(''); scrollOnLoad.current = true }
   }
-  const running = operations.filter(operation => !['sandbox_execution', 'coding_run'].includes(operation.kind) && ['accepted', 'running', 'waiting_user', 'failed'].includes(operation.status))
+  const running = operations.filter(operation => !['sandbox_execution', 'coding_run', 'verification_run', 'material_parse', 'material_cancel', 'verification_cancel'].includes(operation.kind) && ['accepted', 'running', 'waiting_user', 'failed'].includes(operation.status))
   const linkedOperations = new Set(messages.filter(item => item.role === 'user').map(item => item.operation_id))
   const timeline = [
     ...messages.map(item => ({ message: item, created_at: item.created_at })),

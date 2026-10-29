@@ -3,6 +3,19 @@ import { api, ApiError, request, setCsrfToken } from './client'
 
 afterEach(() => { vi.unstubAllGlobals(); setCsrfToken('') })
 describe('API boundary', () => {
+  it('uploads materials as multipart without altering the general submission attachment endpoint', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetcher); setCsrfToken('material-csrf')
+    const file = new File(['synthetic'], 'lesson.pdf', { type: 'application/pdf' })
+    await api.parseMaterial(file, 'material-request')
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/materials')
+    expect(fetcher.mock.calls[0][1].body).toBeInstanceOf(FormData)
+    expect(fetcher.mock.calls[0][1].headers['Content-Type']).toBeUndefined()
+    expect(fetcher.mock.calls[0][1].headers['X-CSRF-Token']).toBe('material-csrf')
+    expect(fetcher.mock.calls[0][1].headers['Idempotency-Key']).toBe('material-request')
+    await api.upload(file, 'submission-upload')
+    expect(fetcher.mock.calls[1][0]).toBe('/api/v1/attachments')
+  })
   it('submits practice choices only to the scoped operation with CSRF and a stable caller key', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response('{}'))
     vi.stubGlobal('fetch', fetcher); setCsrfToken('quiz-csrf')

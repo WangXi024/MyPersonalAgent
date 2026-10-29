@@ -1,4 +1,4 @@
-import { CircleHelp, Compass, Cpu, LogOut, MessageCircle, Mic, Plus, Settings2, Sprout, Sun, WifiOff } from 'lucide-react'
+import { CircleHelp, Compass, Cpu, FileText, LogOut, MessageCircle, Mic, Plus, Settings2, Sprout, Sun, WifiOff } from 'lucide-react'
 import { NavLink, Outlet, Link, Navigate, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { useApp } from '../state'
@@ -18,7 +18,7 @@ export function Layout() {
     <aside className="sidebar">
       <Link to="/today" className="brand"><span className="brand-symbol"><Sprout size={25} strokeWidth={1.8} /></span><span>知行<small>PERSONAL LEARNING</small></span></Link>
       <div className="sidebar-caption">学习空间</div>
-      <nav aria-label="主要导航"><NavLink to="/today"><Sun size={19} />今天<span className="nav-dot" /></NavLink><NavLink to="/assistant"><MessageCircle size={19} />和 Agent 聊聊{data.conversations.some(conversation => conversation.goal_id === null && conversation.unread_count > 0) && <span className="unread-pill">新</span>}</NavLink><NavLink to="/goals"><Compass size={19} />学习目标<span className="nav-count">{goals.length}</span></NavLink></nav>
+      <nav aria-label="主要导航"><NavLink to="/today"><Sun size={19} />今天<span className="nav-dot" /></NavLink><NavLink to="/assistant"><MessageCircle size={19} />和 Agent 聊聊{data.conversations.some(conversation => conversation.goal_id === null && conversation.unread_count > 0) && <span className="unread-pill">新</span>}</NavLink><NavLink to="/goals"><Compass size={19} />学习目标<span className="nav-count">{goals.length}</span></NavLink><NavLink to="/materials"><FileText size={19} />学习资料</NavLink></nav>
       <div className="sidebar-divider" />
       <div className="row spread sidebar-caption"><span>正在前进</span><Link to="/goals/new" aria-label="新建目标"><Plus size={16} /></Link></div>
       <div className="sidebar-goals">{goals.slice(0, 5).map(goal => <NavLink key={goal.id} to={`/goals/${goal.id}`}><span className={`goal-dot ${goal.status}`} /><span>{goal.title}</span>{!!goal.unread_count && <span className="unread-pill">{goal.unread_count}</span>}</NavLink>)}{!goals.length && <p>你的第一个目标，从这里开始。</p>}</div>
