@@ -12,13 +12,14 @@ dependencies = [
   "pydantic-settings>=2.8,<3",
   "argon2-cffi>=23.1,<26",
   "python-multipart>=0.0.20,<1",
-  "pydantic-ai-slim[openai,temporal,duckduckgo]>=1,<3",
+  "pydantic-ai-slim[openai,temporal,duckduckgo,realtime]>=1,<3",
   "temporalio>=1.10,<2",
   "httpx>=0.28,<1",
   "pypdf>=5,<7",
   "tzdata>=2025.1; sys_platform == 'win32'",
   "grpcio>=1.85,<2",
   "pydantic-ai-harness==0.57.0",
+  "cryptography>=46,<52",
 ]
 
 [dependency-groups]

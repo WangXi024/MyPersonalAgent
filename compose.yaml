@@ -243,7 +243,14 @@ services:
       <<: *app-env
       APP_MODEL_ADMIN_USERNAME: ${BOOTSTRAP_USERNAME:-learner}
       LITELLM_ADMIN_KEY_PATH: /run/secrets/litellm_master_key
-    secrets: [app_db_password, litellm_master_key]
+      VOICE_CREDENTIAL_KEY_PATH: /run/secrets/voice_credentials_key
+      VOICE_ENABLED: ${VOICE_ENABLED:-true}
+      VOICE_MAX_SESSION_SECONDS: ${VOICE_MAX_SESSION_SECONDS:-300}
+      VOICE_DAILY_SECONDS: ${VOICE_DAILY_SECONDS:-900}
+      VOICE_IDLE_SECONDS: ${VOICE_IDLE_SECONDS:-60}
+      VOICE_MAX_CONCURRENT: ${VOICE_MAX_CONCURRENT:-1}
+      VOICE_LEASE_SECONDS: ${VOICE_LEASE_SECONDS:-20}
+    secrets: [app_db_password, litellm_master_key, voice_credentials_key]
     depends_on:
       app-bootstrap: {condition: service_completed_successfully}
     healthcheck:
@@ -299,3 +306,4 @@ secrets:
   bailian_api_key: {file: ./.secrets/bailian_api_key}
   zhipu_api_key: {file: ./.secrets/zhipu_api_key}
   ark_api_key: {file: ./.secrets/ark_api_key}
+  voice_credentials_key: {file: ./.secrets/voice_credentials_key}

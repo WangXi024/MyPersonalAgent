@@ -40,6 +40,13 @@ class RuntimeSettings(BaseSettings):
     coding_deadline_seconds: int = Field(1800, ge=120, le=1800)
     coding_max_daily_runs: int = Field(5, ge=1, le=50)
     coding_max_concurrent_per_user: int = Field(1, ge=1, le=3)
+    voice_enabled: bool = True
+    voice_credential_key_path: Path = Path("/run/secrets/voice_credentials_key")
+    voice_max_session_seconds: int = Field(300, ge=30, le=300)
+    voice_daily_seconds: int = Field(900, ge=30, le=7200)
+    voice_idle_seconds: int = Field(60, ge=10, le=60)
+    voice_max_concurrent: int = Field(1, ge=1, le=3)
+    voice_lease_seconds: int = Field(20, ge=10, le=60)
 
 
 @lru_cache

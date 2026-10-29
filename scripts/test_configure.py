@@ -1,4 +1,5 @@
 """Deployment preflight regression checks; no network, credentials, or containers."""
+import base64
 import contextlib
 import io
 import json
@@ -15,13 +16,13 @@ class ConfigurationTests(unittest.TestCase):
         self.origin = Path.cwd()
         self.temp = tempfile.TemporaryDirectory()
         os.chdir(self.temp.name)
-        self.text = "\n".join([
-            "APP_PUBLIC_URL=http://localhost:8080", "APP_BIND_HOST=127.0.0.1",
-            "BOOTSTRAP_USERNAME=test", "BOOTSTRAP_PASSWORD=long-unit-test-only-password",
-            "MODEL_PROVIDER=bailian", "BAILIAN_API_BASE=https://example.test/v1",
-            "BAILIAN_MODEL=unit-test-model", "BAILIAN_API_KEY=<REDACTED>",
-            "APP_MODEL_MONTHLY_BUDGET=20", "MEMORY_MODEL_MONTHLY_BUDGET=10",
-        ])
+        self.text = (
+            "APP_PUBLIC_URL=http://localhost:8080\nAPP_BIND_HOST=127.0.0.1\n"
+            "BOOTSTRAP_USERNAME=test\nBOOTSTRAP_PASSWORD=long-unit-test-only-password\n"
+            "MODEL_PROVIDER=bailian\nBAILIAN_API_BASE=https://example.test/v1\n"
+            "BAILIAN_MODEL=unit-test-model\nBAILIAN_API_KEY=<REDACTED>\n"
+            "APP_MODEL_MONTHLY_BUDGET=20\nMEMORY_MODEL_MONTHLY_BUDGET=10"
+        )
         Path(".env").write_text(self.text)
 
     def tearDown(self):
@@ -40,12 +41,34 @@ class ConfigurationTests(unittest.TestCase):
     def test_repeat_preserves_internal_credentials_and_private_directory(self):
         self.run_configure()
         first = Path(".secrets/app_db_password").read_bytes()
+        voice = Path(".secrets/voice_credentials_key").read_bytes()
+        self.assertEqual(len(base64.urlsafe_b64decode(voice + b"=" * (-len(voice) % 4))), 32)
         self.run_configure()
         self.assertEqual(first, Path(".secrets/app_db_password").read_bytes())
+        self.assertEqual(voice, Path(".secrets/voice_credentials_key").read_bytes())
         # Windows uses ACLs; st_mode does not express POSIX owner-only permissions.
         if os.name != "nt":
             self.assertEqual(Path(".secrets").stat().st_mode & 0o777, 0o700)
             self.assertEqual(Path(".env").stat().st_mode & 0o777, 0o600)
+
+    def test_invalid_voice_key_cannot_be_silently_rotated(self):
+        self.run_configure()
+        key = Path(".secrets/voice_credentials_key")
+        key.chmod(0o600)
+        key.write_text("invalid-existing-key")
+        with self.assertRaisesRegex(ValueError, "voice_credentials_key"):
+            self.run_configure()
+        self.assertEqual(key.read_text(), "invalid-existing-key")
+
+    def test_voice_limits_are_validated_before_generating_credentials(self):
+        for field, value in (("VOICE_ENABLED", "yes"), ("VOICE_MAX_SESSION_SECONDS", "901"),
+                             ("VOICE_DAILY_SECONDS", "100"), ("VOICE_IDLE_SECONDS", "181"),
+                             ("VOICE_MAX_CONCURRENT", "0"), ("VOICE_LEASE_SECONDS", "0")):
+            with self.subTest(field=field):
+                Path(".env").write_text(self.text + f"\n{field}={value}")
+                with self.assertRaisesRegex(ValueError, field):
+                    self.run_configure()
+                self.assertFalse(Path(".secrets").exists())
 
     def test_http_cannot_bind_public_interfaces(self):
         Path(".env").write_text(self.text.replace("APP_BIND_HOST=127.0.0.1", "APP_BIND_HOST=0.0.0.0"))

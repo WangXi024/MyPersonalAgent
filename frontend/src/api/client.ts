@@ -1,4 +1,5 @@
 import type { Accepted, Bootstrap, CodingRun, CodingRunInput, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, SandboxExecution, SandboxExecutionInput, Settings, User } from './types'
+import type { VoiceCapabilities, VoiceConfig, VoiceConfigInput, VoiceSession, VoiceTicket } from '../voice/types'
 
 let csrfToken = ''
 export class ApiError extends Error {
@@ -56,6 +57,13 @@ export const api = {
   createCodingRun: (id: string, body: CodingRunInput, key: string) => request<CodingRun>(`/submissions/${encodeURIComponent(id)}/coding-runs`, { method: 'POST', body, key }),
   codingRun: (id: string) => request<CodingRun>(`/coding-runs/${encodeURIComponent(id)}`),
   cancelCodingRun: (id: string, key: string) => request<CodingRun>(`/coding-runs/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {}, key }),
+  voiceCapabilities: (id?: string) => request<VoiceCapabilities>(`/voice/capabilities${id ? `?conversation_id=${encodeURIComponent(id)}` : ''}`),
+  voiceConfig: () => request<VoiceConfig>('/voice/config'),
+  saveVoiceConfig: (body: VoiceConfigInput, key: string) => request<VoiceConfig>('/voice/config', { method: 'PUT', body, key }),
+  createVoiceSession: (id: string, version: number, revision: number | null, key: string) => request<VoiceSession>(`/conversations/${encodeURIComponent(id)}/voice-sessions`, { method: 'POST', body: { expected_config_version: version, expected_goal_revision: revision }, key }),
+  voiceTicket: (id: string, key: string) => request<VoiceTicket>(`/voice-sessions/${encodeURIComponent(id)}/connect-ticket`, { method: 'POST', body: {}, key }),
+  voiceSession: (id: string) => request<VoiceSession>(`/voice-sessions/${encodeURIComponent(id)}`),
+  stopVoiceSession: (id: string, key: string) => request<VoiceSession>(`/voice-sessions/${encodeURIComponent(id)}/stop`, { method: 'POST', body: {}, key }),
   settings: () => request<Settings>('/settings'),
   updateSettings: (body: unknown, key: string) => request<Settings>('/settings', { method: 'PATCH', body, key }),
   memories: () => request<{ items: Memory[] }>('/memories'),

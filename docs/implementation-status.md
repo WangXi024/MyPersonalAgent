@@ -11,7 +11,7 @@
 | 一 | Windows 环境、WebSearch/WebFetch、组件型 UI | 已实现并部署至本机；后端 123 通过/26 跳过，配置 8/8、Temporal 16/16；前端全套 74 测试及 Unicode 修复后定向 17 测试通过；真实搜索、网页读取与受限模型资料卡联调通过 |
 | 二 A | 自研 sandbox AMD64 适配、RPC 客户端与受控 Python 运行 | 已在本机部署并启用；真实节点 + Temporal + 临时数据库的成功、异常、超时、运行中取消四场景全通过；另有 57 项隔离 PostgreSQL/Temporal 集成检查及独立迁移检查通过；不将运行回执当作业通过 |
 | 二 B | Coder 工作区与可信命令回执 | 已在本机部署并启用；官方真实 WorkspaceBackendSuite 38/38、Coder/Temporal 成功与运行中取消及历史重放通过；原一次性接口四场景兼容通过。测试模型为替身，无生产学习数据写入 |
-| 三 | 实时语音会话与配置界面、学习工作流交接 | 待实施；供应商暂未选择，未配置凭据时不建立计费会话；正式计划与评估仍经过现有结构化业务流程 |
+| 三 | 实时语音会话与配置界面、学习工作流交接 | 接入与配置界面完整验收通过，准备本机更新；后端独立 PG/Temporal 全套 335 通过（另38个真实节点契约已在二B实测），前端150、配置10、真实Nginx合成PCM代理通过。供应商暂未选择，不建立实际计费会话 |
 | 四 | 教学 Skills、历史检索与压缩、工具输出限制、文档与报告 | 待实施；按可独立验收功能逐项交付 |
 | 后续 | Advisor | 暂缓；官方本地回退当前不支持持久执行，需要先验证原生路线与用量统计 |
 
@@ -56,6 +56,16 @@
 - 官方 Coder + 真实 Temporal + 真实工作区：官方 read_file/write_file、实际命令退出码 `[7,0]`、2 个文件保存、工作区销毁和历史重放全通过；运行中取消另测通过，保留 1 个原始文件并确认销毁/重放。模型响应为合成替身（分别 5 次/1 次），不调用付费供应商；原学习提交与评估不变，未写生产学习记录。新节点上的旧 SandboxService 成功/异常/超时/运行中取消四场景均保存结果、清理并 ACK，通过兼容检查。
 - 工作区仅跨应用 Worker 重试复用；sandbox 节点重启后工作区失效并清理，拒绝创建替代环境冒充原状态。主项目本地 `92d1208` 保存最终关闭/errno修复；外部实现本地 `78e331d`、文档 `b8d1df5`，均未推送。默认 Windows 节点镜像标签已指向验收版本，旧回滚镜像保留。
 - 本机完成 0007 迁移，API/Worker/Dispatcher/Web 更新，`CODING_ENABLED=true`。`http://localhost:8080` 的 live/ready（0007）、Coder/联网静态资源、未登录401/已登录不存在资源404、登录/bootstrap/退出检查通过；实际 Worker 的 Temporal timer/activity 无模型烟测通过。7 个应用健康检查及节点 healthy，Worker/Dispatcher 正常运行；语音和可信自动测试评分仍未启用。
+
+阶段三当前实现与验收：
+
+- 新增 `0008_voice` 四表、独立语音配置与时长额度、AESGCM 本机凭据、单次短期连接票据、会话与字幕记录。主密钥由配置脚本生成并保留，仅 API 挂载；保存配置不构造 SDK 或访问供应商，provider=null 可保存未启用草稿，切换供应商不复用旧 Key。Pydantic AI 2.57.0/Harness0.57.0 不升级，仅加 realtime extra 与 cryptography50.0.2。
+- 独立 VoiceAgent 通过官方 `Agent.realtime(...).session(...)` 运行，transcript_only/零音频历史保留、禁用音频追踪；不复用 BudgetedModel/output validators，也不把实时媒体交给 Temporal。媒体默认最多300秒/日900秒/空闲60秒/同用户1会话；失联租约保守结算、未确认清理继续占额度，主动退出、撤权和改配置均停止连接。
+- 浏览器 AudioWorklet、带状态重采样、PCM16LE mono、SDK实际输入/输出采样率、真实设备播放进度 ACK 与打断、停止/断线清理、已存字幕恢复通过测试。无自动媒体重连。转写只能由用户编辑并追加普通消息框，再显式发送原有学习 Agent/Temporal 流程，不直接提交、评分或修改目标。
+- 真实 SDK 原生 codec 替身、真实 TCP WebSocket、临时 SQL 凭据/单消费票据、PCM/10ms播放截断、用量限制、正常stop、慢握手续租及撤销、100帧burst/真实慢客户端背压均通过；所有业务 Message/Evaluation 保持不变。供应商传输层为合成替身，未录物理麦克风、未连接付费语音服务，真实供应商兼容仍待选择后验证。
+- 完整后端在独立 tmpfs PostgreSQL 与真实 Temporal 上 335 通过，38 跳过为另已实测的真实 sandbox 契约；前端22文件150项、配置10项、Ruff/TypeScript/ESLint/生产构建通过。独立0007→0008迁移保留已存在的用户、提交和Coder行，新增四张语音表。
+- 新 Nginx 原始配置在两条独立测试网络上验证实际主机端口、Upgrade、Host/Origin/Cookie透传、首JSON及3200/4800/65536字节合成PCM逐字节往返；测试容器/网络核验标签清理，未连接生产网络或凭据。Nginx配置检查与Composequiet通过。
+- 迁移前已保存 `.backups/personal-agent-20261029T080847Z.tar.age`（3206088字节）：五数据库、附件/服务凭据、配置及主项目/自研sandbox两个本地Git bundle；认证解密及结构检查通过，未进行新部署完整恢复演练。明文暂存/维护锁已清理，原容器恢复并通过0007健康/login/bootstrap/logout。真实语音供应商仍保持未选择。
 
 ## 已实现
 

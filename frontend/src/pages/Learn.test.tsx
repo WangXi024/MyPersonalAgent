@@ -7,11 +7,13 @@ import { bootstrap, conversationModels, detail, task } from '../test/fixtures'
 import { Learn } from './Learn'
 import type { SandboxExecution } from '../api/types'
 import { codingRun } from '../test/coding-fixtures'
+import { voiceCapabilities } from '../test/voice-fixtures'
 const refresh = vi.fn().mockResolvedValue(undefined)
 vi.mock('../state', () => ({ useApp: () => ({ data: bootstrap, revision: 1, refresh }) }))
 vi.mock('../hooks', async importOriginal => { const original = await importOriginal<typeof import('../hooks')>(); return { ...original, useGoal: () => ({ detail, error: null }) } })
 
 beforeEach(() => {
+  vi.spyOn(api, 'voiceCapabilities').mockResolvedValue(voiceCapabilities)
   detail.tasks = [task]
   detail.goal = { ...bootstrap.goals[0] }
   detail.submissions = []

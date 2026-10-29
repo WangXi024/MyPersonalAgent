@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -81,6 +82,82 @@ class ModelConfig(Entity, Base):
     last_request_hash: Mapped[str] = mapped_column(String(64))
     last_test_key: Mapped[str | None] = mapped_column(String(160))
     test_result: Mapped[dict | None] = mapped_column(J)
+
+
+class VoiceConfig(Entity, Base):
+    __tablename__ = "voice_configs"
+    provider: Mapped[str | None] = mapped_column(String(30))
+    model_id: Mapped[str | None] = mapped_column(String(200))
+    voice: Mapped[str | None] = mapped_column(String(100))
+    endpoint: Mapped[str | None] = mapped_column(String(500))
+    api_version: Mapped[str | None] = mapped_column(String(80))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    credential_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    credential_nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    credential_key_id: Mapped[str | None] = mapped_column(String(64))
+    last_request_key: Mapped[str] = mapped_column(String(160))
+    last_request_hash: Mapped[str] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class VoiceSession(Entity, Base):
+    __tablename__ = "voice_sessions"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    auth_session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"))
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    goal_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id"), index=True)
+    config_id: Mapped[str] = mapped_column(ForeignKey("voice_configs.id"))
+    config_version: Mapped[int] = mapped_column(Integer)
+    config_snapshot: Mapped[dict] = mapped_column(J)
+    goal_revision: Mapped[int | None] = mapped_column(Integer)
+    memory_revision: Mapped[int] = mapped_column(Integer)
+    local_date: Mapped[date] = mapped_column(Date)
+    idempotency_key: Mapped[str] = mapped_column(String(160))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    reason: Mapped[str | None] = mapped_column(String(60))
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    owner_id: Mapped[str | None] = mapped_column(String(100))
+    ticket_hash: Mapped[str | None] = mapped_column(String(64))
+    ticket_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ticket_consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    max_seconds: Mapped[int] = mapped_column(Integer)
+    reserved_seconds: Mapped[int] = mapped_column(Integer)
+    consumed_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    quota_settled: Mapped[bool] = mapped_column(Boolean, default=False)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    cleanup_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    usage: Mapped[dict] = mapped_column(J, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key"),)
+
+
+class VoiceTurn(Entity, Base):
+    __tablename__ = "voice_turns"
+    session_id: Mapped[str] = mapped_column(ForeignKey("voice_sessions.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    index: Mapped[int] = mapped_column(Integer)
+    speaker: Mapped[str] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(Text)
+    final: Mapped[bool] = mapped_column(Boolean, default=False)
+    interrupted: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (UniqueConstraint("session_id", "index", "speaker"),)
+
+
+class VoiceDailyBudget(Base):
+    __tablename__ = "voice_daily_budgets"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    local_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    reserved_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    consumed_seconds: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class LoginAttempt(Entity, Base):

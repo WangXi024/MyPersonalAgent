@@ -12,6 +12,7 @@ import { GoalActionReceipt } from './GoalActionReceipt'
 import { MarkdownMessage } from './MarkdownMessage'
 import { ModelUsage } from './ModelUsage'
 import { GenerativeUI } from './generative/GenerativeUI'
+import { VoicePanel } from './VoicePanel'
 
 interface Props {
   conversationId: string | null
@@ -151,6 +152,7 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
   return <section className={`chat-card card ${compact ? 'chat-compact' : ''}${workspace ? ' chat-workspace' : ''}`} aria-label={goalId ? '学习对话' : '和 Agent 对话'}>
     {!workspace && <div className="chat-header"><div className="row"><span className="chat-avatar"><Sparkles size={19} /></span><div><strong>{goalId ? '和学习伙伴聊聊' : '和 Agent 聊聊'}</strong><small>{goalId ? '主动建议和你的问题，都在这里。' : '目标还没想清楚，也可以直接开始对话。'}</small></div></div>{compact ? <Link className="text-button" to="/assistant">完整对话<ArrowUpRight size={14} /></Link> : <MessageCircle size={18} />}</div>}
     <ModelUsage usage={usage} aggregate /><ErrorNotice error={usageError} retry={() => void refresh()} />
+    <VoicePanel key={conversationId} conversationId={conversationId} canSend={canSend && !messageAction.pending} goalRevision={data?.goals.find(goal => goal.id === goalId)?.control_revision ?? null} onUseTranscript={text => setMessage(previous => previous.trim() ? `${previous}\n\n${text}` : text)} />
     <div className="chat-messages" ref={chatPane}><ErrorNotice error={connectionError ?? null} retry={retryConnect} /><ErrorNotice error={messagesError} retry={() => void refresh()} /><ErrorNotice error={draftsError} retry={() => void refresh()} />{timeline.length ? timeline.map(entry => {
       if ('operation' in entry) return renderOperation(entry.operation)
       const item = entry.message

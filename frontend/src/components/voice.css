@@ -1,0 +1,7 @@
+.voice-panel{margin:8px 0 10px;border-top:1px solid var(--line);padding-top:9px;min-width:0}
+.voice-controls{gap:7px 13px}.voice-controls button{display:inline-flex;gap:5px;align-items:center;font-size:11px}
+.voice-detail{margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fcfcfc;max-height:350px;overflow:auto;min-width:0}
+.voice-note{font-size:11px!important;color:var(--muted);line-height:1.8!important;margin:5px 0!important;text-align:left!important}
+.voice-level{display:flex;gap:9px;align-items:center;margin:10px 0;font-size:10px;color:var(--muted)}.voice-level meter{width:110px;height:10px}
+.voice-transcripts{list-style:none;padding:0;margin:11px 0 0;display:grid;gap:11px}.voice-transcripts li{border-top:1px solid var(--line);padding-top:8px}.voice-transcripts strong{font-size:11px;font-weight:550;color:#555}.voice-transcripts p{font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}
+.voice-transcripts .text-button,.voice-transcript-draft .text-button{font-size:11px}.voice-transcript-draft{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}.voice-transcript-draft>label{font-size:12px}.voice-transcript-draft textarea{border:1px solid var(--line)!important;font-size:13px!important;padding:8px!important;min-height:70px!important;margin:6px 0!important}

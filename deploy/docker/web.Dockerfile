@@ -9,3 +9,4 @@ FROM nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a1714
 COPY --from=build /src/dist /usr/share/nginx/html
 COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/proxy.conf /etc/nginx/proxy-common.conf
+COPY deploy/nginx/websocket.conf /etc/nginx/proxy-websocket.conf

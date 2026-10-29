@@ -150,4 +150,14 @@ Coder 需要支持 `WorkspaceService` 的自研节点，不能只提供旧的一
 
 入口位于学习页已保存提交旁的“编码助手”。输入本次指令后才使用模型及工作区；保存文件后由用户自行下载、审阅和重新提交，不自动判定作业通过。语音配置及供应商会话另行启用，不复用聊天模型兼容地址。
 
+## 9. 实时语音配置
+
+部署管理员在 `/settings/voice` 配置供应商、原生语音模型与音色。默认供应商为空、配置未启用；保存草稿及“本地测试麦克风”不连接供应商。OpenAI/Azure 与普通聊天兼容接口不能混用，Google/xAI 在相应依赖未安装时只能保存未启用配置。供应商连接及真实麦克风验收须在选定配置后进行。
+
+`scripts/configure.py` 生成并保留 `.secrets/voice_credentials_key`，仅 API 容器挂载。供应商 Key 由 AESGCM 加密存入数据库，不回显；该主密钥必须随加密备份保留，不能在重新配置时轮换。Worker、Dispatcher 与 sandbox 不获得该文件。迁移至少为 `0008_voice`，API/Web 镜像同时更新以发布 WebSocket 代理和 `/voice-capture.worklet.js`。
+
+`VOICE_ENABLED` 只控制模块可用性，默认配置仍未启用；可用它停用全部语音。默认单次 300 秒、每日 900 秒、空闲 60 秒和每用户并发 1，可通过 `.env.local` 中对应变量下调。语音使用独立供应商计费，不受聊天网关月度预算控制，目前不提供金额估算。连接退出后保留字幕，音频默认不保存；断线后需用户手动重新开始。
+
+浏览器音频需要 localhost 或 HTTPS，并由用户点击授权。HTTPS 部署的 Nginx TLS 模板已包含同一 WebSocket 代理；前置 TLS 代理也须透传 Upgrade、Origin、Cookie 和原始 Host。不能把 WebM/Opus 直接作为 PCM 发送。麦克风本地测试只在浏览器内录制 3 秒并回放，随后释放设备。
+
 官方参考：[百炼兼容接口](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)、[智谱接口](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)、[方舟接口](https://www.volcengine.com/docs/82379/1330310)、[Hindsight 配置](https://hindsight.vectorize.io/developer/configuration)、[Temporal 自托管](https://docs.temporal.io/self-hosted-guide/deployment)。

@@ -14,6 +14,17 @@ class FakeEventSource {
 }
 
 describe('persistent event stream', () => {
+  it('refreshes saved voice metadata and configuration without a second audio connection', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const onEvent = vi.fn()
+    const close = openEventStream(1, onEvent, vi.fn(), vi.fn(), vi.fn())
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('voice.session_updated', { seq: 2, type: 'voice.session_updated' })
+    source.emit('voice.session_updated', { seq: 2, type: 'voice.session_updated' })
+    source.emit('voice.configured', { seq: 3, type: 'voice.configured' })
+    expect(onEvent.mock.calls.map(([event]) => event.seq)).toEqual([2, 3])
+    close(); vi.unstubAllGlobals()
+  })
   it('starts after the snapshot cursor and ignores duplicate or older events', () => {
     vi.stubGlobal('EventSource', FakeEventSource)
     const onEvent = vi.fn()

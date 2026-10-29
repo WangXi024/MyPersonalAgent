@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../api/client'
 import type { GenUIBlock, GoalDraft, Message } from '../api/types'
 import { bootstrap, conversationModels } from '../test/fixtures'
+import { voiceCapabilities, voiceSession } from '../test/voice-fixtures'
 import { Assistant } from '../pages/Assistant'
 import { AssistantChat } from './AssistantChat'
 let data = structuredClone(bootstrap)
@@ -14,6 +15,7 @@ const refresh = vi.fn().mockResolvedValue(undefined)
 const globalConversation = { id: 'assistant-conversation', goal_id: null, last_seq: 0, read_seq: 0, unread_count: 0 }
 vi.mock('../state', () => ({ useApp: () => ({ data, revision, refresh, connection }) }))
 beforeEach(() => {
+  vi.spyOn(api, 'voiceCapabilities').mockResolvedValue(voiceCapabilities)
   revision = 1
   connection = 'connected'
   data = { ...structuredClone(bootstrap), goals: [], tasks: [], conversations: [] }
@@ -25,6 +27,25 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
 })
 describe('direct Agent conversation', () => {
+  it('appends reviewed voice text to the existing composer and sends only after the normal send action', async () => {
+    const user = userEvent.setup()
+    data.conversations = [globalConversation]
+    vi.mocked(api.voiceCapabilities).mockResolvedValue({ ...voiceCapabilities, latest_session: { ...voiceSession, conversation_id: globalConversation.id, status: 'closed', cleanup_done: true,
+      transcripts: [{ index: 1, speaker: 'user', text: '我想查一下循环练习资料', final: true, interrupted: false }] } })
+    const command = vi.spyOn(api, 'command').mockResolvedValue({ operation_id: 'voice-text-op', status: 'accepted' })
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    await screen.findByRole('option', { name: '百炼 已配置模型' })
+    const input = screen.getByLabelText('给学习伙伴发消息')
+    await user.type(input, '保留原有草稿')
+    await user.click(screen.getByRole('checkbox', { name: '联网查资料' }))
+    await user.click(screen.getByRole('button', { name: '语音' }))
+    await user.click(await screen.findByRole('button', { name: '编辑这段转写' }))
+    await user.click(screen.getByRole('button', { name: '追加到消息框' }))
+    expect(input).toHaveValue('保留原有草稿\n\n我想查一下循环练习资料')
+    expect(command).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(command).toHaveBeenCalledWith(`/conversations/${globalConversation.id}/messages`, { content: '保留原有草稿\n\n我想查一下循环练习资料', research_requested: true }, expect.any(String))
+  })
   it('shows historical reply usage and refreshes cumulative usage after an operation event', async () => {
     data.conversations = [globalConversation]
     const usage = { model_name: '历史选择模型', requests: 2, input_tokens: 1000, output_tokens: 200,

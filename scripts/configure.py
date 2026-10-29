@@ -1,12 +1,14 @@
 """Validate local literal dotenv configuration and generate protected runtime files."""
 import argparse
+import base64
+import binascii
 import json
 import math
 import os
 import re
 import secrets
-from pathlib import Path
 from decimal import Decimal
+from pathlib import Path
 from urllib.parse import urlsplit
 
 
@@ -33,6 +35,22 @@ def read_env(path):
 
 def valid(value):
     return bool(value) and not any(x in value.lower() for x in ("<", ">", "changeme", "your-api", "example-password"))
+
+
+def prepare_voice_master_key():
+    """Generate once. Reconfiguration must never rotate a key protecting saved credentials."""
+    path = Path(".secrets/voice_credentials_key")
+    if not path.exists():
+        with path.open("x", encoding="ascii") as handle:
+            handle.write(secrets.token_urlsafe(32))
+    try:
+        encoded = path.read_text(encoding="ascii").strip()
+        decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+        if len(decoded) != 32:
+            raise ValueError()
+    except (ValueError, UnicodeError, binascii.Error):
+        raise ValueError("Existing voice_credentials_key is invalid; restore the original key instead of rotating it") from None
+    path.chmod(0o444)
 
 
 def configure(env_file, check_only=False, infrastructure_only=False):
@@ -96,6 +114,17 @@ def configure(env_file, check_only=False, infrastructure_only=False):
     for name, default in (("APP_PORT", "8080"), ("APP_TLS_PORT", "8443"), ("MODEL_REQUEST_TIMEOUT", "630"), ("DEPLOY_TIMEOUT", "1800")):
         if not cfg.get(name, default).isdigit() or int(cfg.get(name, default)) < 1:
             raise ValueError(name + " must be a positive integer")
+    if cfg.get("VOICE_ENABLED", "true") not in {"true", "false"}:
+        raise ValueError("VOICE_ENABLED must be true or false")
+    voice_bounds = {"VOICE_MAX_SESSION_SECONDS": (300, 30, 300), "VOICE_DAILY_SECONDS": (900, 30, 7200),
+                    "VOICE_IDLE_SECONDS": (60, 10, 60), "VOICE_MAX_CONCURRENT": (1, 1, 3),
+                    "VOICE_LEASE_SECONDS": (20, 10, 60)}
+    for name, (default, minimum, maximum) in voice_bounds.items():
+        value = cfg.get(name, str(default))
+        if not value.isdigit() or not minimum <= int(value) <= maximum:
+            raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
+    if int(cfg.get("VOICE_DAILY_SECONDS", "900")) < int(cfg.get("VOICE_MAX_SESSION_SECONDS", "300")):
+        raise ValueError("VOICE_DAILY_SECONDS must cover at least one full session reservation")
     if check_only:
         print("Configuration validation passed; no secrets or model calls were made.")
         return
@@ -103,6 +132,7 @@ def configure(env_file, check_only=False, infrastructure_only=False):
     for name in (".secrets", ".runtime"):
         Path(name).mkdir(exist_ok=True)
         Path(name).chmod(0o700)
+    prepare_voice_master_key()
     for name in ("core_postgres_password", "memory_postgres_password", "app_db_password", "temporal_db_password", "visibility_db_password", "litellm_db_password", "memory_db_password", "litellm_master_key", "litellm_salt_key"):
         path = Path(".secrets", name)
         if not path.exists():

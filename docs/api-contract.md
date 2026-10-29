@@ -126,3 +126,23 @@ SSE business events `goal_draft.proposed`, `goal_draft.superseded`, and `goal_dr
 Goal detail includes `coding_runs`; `coding.run_updated` refreshes the persistent snapshot. `workspace_created=false` means creation has not been confirmed, including a lost Open response. `cleanup_done` is the authoritative cleanup acknowledgement. Command `exit_code=null` stays unknown; after confirmed cleanup an unfinished command is `interrupted`, never inferred successful from stdout. Closing/retrying never creates a replacement workspace or runs the model again.
 
 Defaults: 5 runs per rolling 24 hours, one in-flight run per user (including unconfirmed cleanup), 30 minutes per workspace and 120 seconds per command. Generated files are capped at 8 files, 8 MiB each and 16 MiB total. No network or credentials enter the workspace. Generated files do not replace the submission, create an evaluation, or advance mastery. Node restart invalidates the workspace; application Worker retries can reattach while the same node remains alive. Disabled service returns 503, stale versions 409, limits 429, and another user's resources 404.
+
+## Realtime voice
+
+Voice uses an explicitly configured native realtime provider. It does not inherit the chat gateway/model/key. Saving a disabled draft with `provider=null` performs no provider call. Administrators use `GET/PUT /voice/config`; PUT requires CSRF, an idempotency key and `expected_version`. Optional `api_key` is write-only and encrypted locally. Provider/endpoint changes clear the old credential. Public config never includes keys, ciphertext, nonces or credential references.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /voice/capabilities?conversation_id=...` | Provider/dependency readiness, allowed start/reason, limits, remaining time and latest owned session |
+| `POST /conversations/{id}/voice-sessions` | Explicit reservation bound to config version, conversation, user and login session |
+| `POST /voice-sessions/{id}/connect-ticket` | 30-second single-use ticket; stored as a hash |
+| `GET /voice-sessions/{id}` | Saved status, final/interrupted transcripts and usage |
+| `POST /voice-sessions/{id}/stop` | Idempotent stop request; confirmed closure uses `cleanup_done` |
+
+Session creation accepts `expected_config_version` and an optional `expected_goal_revision` for goal conversations. Normal HTTP authentication, Origin and CSRF rules apply. WebSocket `/voice-sessions/{id}/socket` checks Cookie and exact Origin, then requires first JSON `{"type":"authenticate","ticket":"..."}`. It atomically consumes the ticket before constructing the provider. Tickets/keys never go in URLs.
+
+`session.ready` supplies actual input/output sample rates, PCM16LE mono format and interruption support. Binary frames carry PCM; `audio.chunk` announces `response_id`, monotonic `sequence` and byte count before its paired binary frame. Transcript events use stable `index` and `speaker`. Client `playback.ack`/`interrupt` reports response-specific actual `played_bytes`; network delivery is only an upper bound. Client `stop` closes the session. No automatic media reconnection occurs; refresh restores saved text/status.
+
+Defaults are 300 seconds per session, 900 per local day, one concurrent session per user and 60 seconds without activity. Reservations are separate from learning minutes and chat monthly spending. A crashed owner is settled conservatively; unknown cleanup retains the slot until the absolute session deadline. Cookie revocation, account/goal/memory/config changes stop the connection. These limits are not a guaranteed monetary cap.
+
+Raw audio is not persisted or sent to Temporal; final/interrupted transcripts and usage are saved. `voice.session_updated` refreshes snapshots. Realtime has no business action tools: users edit a transcript, append it to the ordinary message composer and explicitly send through the existing validated learning workflow.
