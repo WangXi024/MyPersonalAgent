@@ -35,6 +35,7 @@ class CodingWorkflow(PydanticAIWorkflow):
         # workspace. Keep retrying only the idempotent export/close lifecycle.
         cleanup_deadline = workflow.now() + timedelta(hours=24)
         state = {"operation_id": operation_id, "terminal": False, "cleanup_done": False}
+        retry_seconds = 5
         while True:
             try:
                 if self.cancel_requested:
@@ -48,7 +49,8 @@ class CodingWorkflow(PydanticAIWorkflow):
                 workflow.logger.warning("Coder lifecycle pending for operation %s", operation_id)
             if workflow.now() >= cleanup_deadline:
                 return state
-            await workflow.sleep(timedelta(seconds=30))
+            await workflow.sleep(timedelta(seconds=retry_seconds))
+            retry_seconds = min(300, retry_seconds * 2)
 
     @workflow.run
     async def run(self, operation_id: str) -> dict:
@@ -60,14 +62,26 @@ class CodingWorkflow(PydanticAIWorkflow):
                 return state
             self.cancel_requested = self.cancel_requested or state["cancel_requested"]
             if state.get("agent_ready") and not self.cancel_requested:
+                deadline = workflow.now() + timedelta(seconds=max(0, state["remaining_seconds"]))
                 agent_task = asyncio.create_task(CODER_AGENT.run(state["prompt"], deps=state["deps"],
                     model_settings={"learning_operation_id": operation_id},
                     usage_limits=UsageLimits(request_limit=6, total_tokens_limit=80000)))
-                try:
-                    await workflow.wait_condition(lambda: self.cancel_requested or agent_task.done(),
-                        timeout=timedelta(seconds=max(0, state["remaining_seconds"])))
-                except TimeoutError:
-                    error_code = "operation_timeout"
+                while not self.cancel_requested and not agent_task.done():
+                    remaining = deadline - workflow.now()
+                    if remaining <= timedelta(0):
+                        error_code = "operation_timeout"
+                        break
+                    try:
+                        await workflow.wait_condition(lambda: self.cancel_requested or agent_task.done(),
+                            timeout=min(timedelta(seconds=5), remaining))
+                    except TimeoutError:
+                        if workflow.now() >= deadline:
+                            error_code = "operation_timeout"
+                            break
+                        scope = await workflow.execute_activity(activities.check_coding_scope, operation_id,
+                            start_to_close_timeout=timedelta(seconds=30),
+                            retry_policy=RetryPolicy(maximum_attempts=3))
+                        self.cancel_requested = self.cancel_requested or not scope["allowed"]
                 if not agent_task.done():
                     agent_task.cancel()
                     await asyncio.gather(agent_task, return_exceptions=True)
@@ -85,4 +99,7 @@ class CodingWorkflow(PydanticAIWorkflow):
         except Exception as error:  # noqa: BLE001 -- persist no provider payload or credentials
             workflow.logger.warning("Coder operation %s failed: %s", operation_id, type(error).__name__)
             error_code = "agent_failed"
+            if agent_task and not agent_task.done():
+                agent_task.cancel()
+                await asyncio.gather(agent_task, return_exceptions=True)
         return await self._finish(operation_id, summary=summary, error_code=error_code)

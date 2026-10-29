@@ -239,3 +239,35 @@ async def test_record_command_is_stable_and_unknown_exit_code_is_not_zero(databa
     async with database[0]() as db:
         rows = list(await db.scalars(select(CodingCommand)))
         assert len(rows) == 1 and rows[0].exit_code is None
+
+
+async def test_confirmed_cleanup_settles_running_commands_without_inventing_exit_code(database, config, remote):
+    item, _, _ = await create(database)
+    await domain.prepare_coding(item["operation_id"])
+    await domain.record_command(item["operation_id"], "cmd", "sleep 3600", {
+        "state": "running", "exit_code": None, "stdout": "partial", "stderr": ""})
+    state = await domain.cancel_coding(item["operation_id"])
+    assert state["cleanup_done"]
+    # A late running callback must neither reopen the command nor erase its partial output.
+    await domain.record_command(item["operation_id"], "cmd", "sleep 3600", {
+        "state": "running", "exit_code": None, "stdout": "", "stderr": ""})
+    async with database[0]() as db:
+        row = await db.scalar(select(CodingCommand).where(CodingCommand.run_id == item["id"]))
+        assert row.status == "interrupted" and row.finished_at and row.exit_code is None and row.stdout == "partial"
+    # A real remote receipt may arrive after Close; retain its actual exit code and split logs.
+    await domain.record_command(item["operation_id"], "cmd", "sleep 3600", {
+        "state": "finished", "exit_code": 143, "stdout": "partial", "stderr": "terminated"})
+    async with database[0]() as db:
+        row = await db.scalar(select(CodingCommand).where(CodingCommand.run_id == item["id"]))
+        assert row.status == "finished" and row.exit_code == 143 and row.stderr == "terminated"
+
+
+async def test_new_late_running_callback_after_cleanup_is_already_interrupted(database, config, remote):
+    item, _, _ = await create(database)
+    await domain.prepare_coding(item["operation_id"])
+    await domain.cancel_coding(item["operation_id"])
+    await domain.record_command(item["operation_id"], "late", "sleep 1", {
+        "state": "running", "exit_code": None, "stdout": "", "stderr": ""})
+    async with database[0]() as db:
+        row = await db.scalar(select(CodingCommand).where(CodingCommand.run_id == item["id"]))
+        assert row.status == "interrupted" and row.finished_at and row.exit_code is None

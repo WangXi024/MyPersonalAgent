@@ -33,4 +33,9 @@ async def cancel_coding(operation_id: str) -> dict:
     return await _call("cancel_coding", operation_id)
 
 
-CODING_ACTIVITIES = [prepare_coding, finish_coding, cancel_coding]
+@activity.defn(name="coding_scope")
+async def check_coding_scope(operation_id: str) -> dict:
+    return await _call("workspace_scope", operation_id)
+
+
+CODING_ACTIVITIES = [prepare_coding, finish_coding, cancel_coding, check_coding_scope]

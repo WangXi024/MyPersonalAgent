@@ -205,18 +205,20 @@ async def record_command(operation_id, command_id, command, remote):
         item, op, user, stream, goal = await _locked(db, operation_id)
         row = await db.scalar(select(CodingCommand).where(CodingCommand.run_id == item.id,
                                                          CodingCommand.remote_id == command_id))
-        if row is not None and row.status == "finished" and remote["state"] != "finished":
+        if row is not None and row.status in {"finished", "interrupted"} and remote["state"] != "finished":
             return  # A retried activity's initial placeholder cannot erase the real receipt.
+        if row is not None and row.status == "finished" and row.exit_code is not None and remote["exit_code"] is None:
+            return
         if row is None:
             count = await db.scalar(select(func.count()).select_from(CodingCommand).where(CodingCommand.run_id == item.id))
             if count >= 64:
                 raise DomainError("command_budget", "本次编码命令次数达到上限", 429)
             row = CodingCommand(user_id=item.user_id, run_id=item.id, remote_id=command_id, command=command[:12000])
             db.add(row)
-        row.status = remote["state"]
+        row.status = "interrupted" if item.cleanup_done and remote["state"] != "finished" else remote["state"]
         row.stdout, row.stderr = remote["stdout"][:65536], remote["stderr"][:65536]
-        row.exit_code = remote["exit_code"]
-        if row.status == "finished":
+        row.exit_code = remote["exit_code"] if row.status == "finished" else None
+        if row.status in {"finished", "interrupted"}:
             row.finished_at = now()
         await emit(db, stream, "coding.run_updated", item.id, "编码命令运行记录已更新", item.goal_id, op.id)
 
@@ -348,6 +350,10 @@ async def finish_coding(operation_id, summary="", *, error_code=None):
             if item.status == "succeeded":
                 item.status = "failed"
         item.cleanup_done, item.stage = True, "finished"
+        unfinished = await db.scalars(select(CodingCommand).where(CodingCommand.run_id == item.id,
+            CodingCommand.user_id == item.user_id, CodingCommand.status.not_in({"finished", "interrupted"})))
+        for command in unfinished:
+            command.status, command.finished_at, command.exit_code = "interrupted", now(), None
         await _changed(db, item, op, stream, "编码任务已结束，未修改作业提交或学习评估")
         return _state(item)
 

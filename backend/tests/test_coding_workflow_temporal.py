@@ -12,7 +12,7 @@ pytestmark = pytest.mark.skipif(not os.getenv("TEMPORAL_TEST_ADDRESS"), reason="
 
 
 @pytest.mark.parametrize("scenario", ["success", "cancel_before", "cancel_running", "timeout", "agent_failure",
-                                       "cleanup_retry", "cleanup_only"])
+                                       "cleanup_retry", "cleanup_only", "scope_revoked"])
 async def test_coding_lifecycle_cancel_deadline_export_and_replay(monkeypatch, scenario):
     from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
     from temporalio import activity, workflow
@@ -56,13 +56,17 @@ async def test_coding_lifecycle_cancel_deadline_export_and_replay(monkeypatch, s
         state.update(cancel_requested=True)
         return await finish(_)
 
+    async def scope(_):
+        calls.append("scope")
+        return {"allowed": scenario != "scope_revoked"}
+
     @activity.defn(name="synthetic_coding_model")
     async def synthetic_model() -> str:
         calls.append("model")
         started.set()
         if scenario == "agent_failure":
             raise ApplicationError("Synthetic model failure", non_retryable=True)
-        if scenario in {"cancel_running", "timeout"}:
+        if scenario in {"cancel_running", "timeout", "scope_revoked"}:
             await asyncio.sleep(120)
         return "Synthetic output"
 
@@ -73,6 +77,7 @@ async def test_coding_lifecycle_cancel_deadline_export_and_replay(monkeypatch, s
     monkeypatch.setattr(coding_runs, "prepare_coding", prepare)
     monkeypatch.setattr(coding_runs, "finish_coding", finish)
     monkeypatch.setattr(coding_runs, "cancel_coding", cancel)
+    monkeypatch.setattr(coding_runs, "workspace_scope", scope)
     monkeypatch.setattr(CODER_AGENT, "run", run)
     client = await Client.connect(os.environ["TEMPORAL_TEST_ADDRESS"],
         namespace=os.getenv("TEMPORAL_TEST_NAMESPACE", "learning-agent"), plugins=[PydanticAIPlugin()])
@@ -89,8 +94,10 @@ async def test_coding_lifecycle_cancel_deadline_export_and_replay(monkeypatch, s
     assert calls.count("model") == (0 if scenario in {"cancel_before", "cleanup_only"} else 1)
     assert calls.count("prepare") == 1
     assert calls.count("finish") == (4 if scenario == "cleanup_retry" else 1)
-    if scenario.startswith("cancel"):
+    if scenario.startswith("cancel") or scenario == "scope_revoked":
         assert result["status"] == "cancelled" and calls.count("cancel") == 1
+    if scenario == "scope_revoked":
+        assert calls.count("scope") == 1
     previous = list(calls)
     history = await handle.fetch_history()
     await Replayer(workflows=[CodingWorkflow], plugins=[PydanticAIPlugin()]).replay_workflow(history)

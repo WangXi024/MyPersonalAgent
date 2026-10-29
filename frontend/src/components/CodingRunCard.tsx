@@ -29,7 +29,7 @@ export function CodingRunCard({ run, sourceLabel, timezone, onCancel, cancelling
     {run.summary && <div className="coding-run-summary"><MarkdownMessage content={run.summary} /></div>}
     {run.commands.length > 0 && <div className="coding-run-commands"><h4>实际命令记录</h4>{run.commands.map(command => <section key={command.id} className="coding-command" aria-label={`命令记录：${command.id}`}>
       <pre className="coding-command-text">{command.command}</pre>
-      <div className="row spread wrap coding-command-meta"><span>{Number.isInteger(command.exit_code) ? `退出码 ${command.exit_code}` : command.status === 'running' ? '命令仍在运行，尚无退出码' : '本次未返回退出码'}</span><time dateTime={command.started_at}>{timeLabel(command.started_at, timezone)}</time></div>
+      <div className="row spread wrap coding-command-meta"><span>{Number.isInteger(command.exit_code) ? `退出码 ${command.exit_code}` : run.cleanup_done ? '命令已停止，未返回退出码' : command.status === 'running' ? '命令仍在运行，尚无退出码' : '本次未返回退出码'}</span><time dateTime={command.started_at}>{timeLabel(command.started_at, timezone)}</time></div>
       {command.stdout && <details className="sandbox-output" open><summary>命令输出 stdout</summary><pre>{command.stdout}</pre></details>}
       {command.stderr && <details className="sandbox-output" open><summary>命令错误 stderr</summary><pre>{command.stderr}</pre></details>}
     </section>)}</div>}

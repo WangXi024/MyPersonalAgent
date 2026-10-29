@@ -84,4 +84,17 @@ describe('coding assistant evidence', () => {
     expect(screen.getByText('等待编码助手')).toBeVisible()
     expect(screen.queryByLabelText('模型用量')).not.toBeInTheDocument()
   })
+
+  it('uses confirmed workspace cleanup to stop an unknown-exit command even if its old state is running', () => {
+    const command = { id: 'lost-command', command: 'python long_task.py', exit_code: null, stdout: '', stderr: '',
+      status: 'running' as const, started_at: codingRun.created_at, finished_at: null }
+    const view = render(<CodingRunCard run={{ ...codingRun, commands: [command], cleanup_done: false }} sourceLabel="main.py" />)
+    expect(screen.getByText('命令仍在运行，尚无退出码')).toBeVisible()
+    view.rerender(<CodingRunCard run={{ ...codingRun, status: 'cancelled', commands: [command], cleanup_done: true }} sourceLabel="main.py" />)
+    expect(screen.getByText('命令已停止，未返回退出码')).toBeVisible()
+    expect(screen.queryByText('命令仍在运行，尚无退出码')).not.toBeInTheDocument()
+    expect(screen.queryByText('退出码 0')).not.toBeInTheDocument()
+    view.rerender(<CodingRunCard run={{ ...codingRun, status: 'cancelled', commands: [{ ...command, status: 'interrupted' }], cleanup_done: true }} sourceLabel="main.py" />)
+    expect(screen.getByText('命令已停止，未返回退出码')).toBeVisible()
+  })
 })
