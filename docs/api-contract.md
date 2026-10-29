@@ -111,3 +111,18 @@ The endpoint checks conversation ownership and returns the most recent 30 draft 
 The original tutor operation remains global and completed. Same-content confirmation retries with either the same or a fresh key return the original acceptance response and cannot create a second goal. Each request key is recorded as a completed control operation; it cannot be reused for another command. The plan operation uses a stable key derived from the draft operation. A different confirmation payload after acceptance returns HTTP 409 `goal_draft_conflict`; an obsolete draft returns HTTP 409 `goal_draft_superseded`; invalid fields return 422; another user's draft returns 404.
 
 SSE business events `goal_draft.proposed`, `goal_draft.superseded`, and `goal_draft.accepted` prompt the frontend to refresh cards. Ordinary goal, operation and message events continue unchanged. `load_context.goal_drafts` supplies the global Agent with the latest 10 draft status summaries (`operation_id`, `status`, `title`, `goal_id`, `goal_status`, `goal_control_revision`, `plan_operation_id`) so historical acceptance is distinguished from current goal state. No database migration is needed for drafts.
+
+## Explicit Coder runs
+
+`POST /submissions/{id}/coding-runs` requires the usual authentication, CSRF and `Idempotency-Key`. Body: `expected_version` (task), `expected_goal_revision`, `attachment_id` (null for the saved body), and `instruction` (1–4000 characters). It returns HTTP 202 with the persisted run. Only the current saved submission in the active plan is accepted; Python source must be UTF-8 and at most 1 MiB. Model selection is frozen from the goal conversation when the run is created.
+
+| Endpoint | Result |
+| --- | --- |
+| `GET /submissions/{id}/coding-runs` | Owned submission's latest runs |
+| `GET /coding-runs/{id}` | Status, command receipts, generated files and usage |
+| `POST /coding-runs/{id}/cancel` | Idempotent stop request; does not claim cleanup until confirmed |
+| `GET /coding-runs/{id}/artifacts/{artifact_id}` | Owned generated file as an attachment |
+
+Goal detail includes `coding_runs`; `coding.run_updated` refreshes the persistent snapshot. `workspace_created=false` means creation has not been confirmed, including a lost Open response. `cleanup_done` is the authoritative cleanup acknowledgement. Command `exit_code=null` stays unknown; after confirmed cleanup an unfinished command is `interrupted`, never inferred successful from stdout. Closing/retrying never creates a replacement workspace or runs the model again.
+
+Defaults: 5 runs per rolling 24 hours, one in-flight run per user (including unconfirmed cleanup), 30 minutes per workspace and 120 seconds per command. Generated files are capped at 8 files, 8 MiB each and 16 MiB total. No network or credentials enter the workspace. Generated files do not replace the submission, create an evaluation, or advance mastery. Node restart invalidates the workspace; application Worker retries can reattach while the same node remains alive. Disabled service returns 503, stale versions 409, limits 429, and another user's resources 404.

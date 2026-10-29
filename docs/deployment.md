@@ -142,4 +142,12 @@ COMPOSE_PROJECT_NAME=learning-recovery ./scripts/smoke-test.sh
 
 Hindsight 固定 worker ID 为 `hindsight-main`；恢复记忆后台任务的测试仍属于生产验收，不能通过更改 ID 回避问题。
 
+## 8. 可选 Coder 与自研 sandbox
+
+Coder 需要支持 `WorkspaceService` 的自研节点，不能只提供旧的一次性 `SandboxService`。Windows 本机节点继续使用独立 Compose 项目及 `127.0.0.1:18443`；应用容器通过 `SANDBOX_ADDRESS=host.docker.internal:18443` 连接。节点运行真实 gVisor，文件仅在单次任务工作区中保留，任务结束销毁；不挂主机项目目录、Docker socket 或供应商凭据。
+
+确认节点通过官方工作区契约及关闭确认测试后，在本地未提交的 `.env.local` 设置 `CODING_ENABLED=true`。按现有流程完成 `app-migrate`（至少 `0007_coding_runs`），再更新 API、Worker、Dispatcher 和 Web；不要重新初始化数据库或覆盖现有密钥。`CODING_DEADLINE_SECONDS` 最大 1800，默认每日 5 次、同用户在途 1 次；未确认清理仍计入在途额度。
+
+入口位于学习页已保存提交旁的“编码助手”。输入本次指令后才使用模型及工作区；保存文件后由用户自行下载、审阅和重新提交，不自动判定作业通过。语音配置及供应商会话另行启用，不复用聊天模型兼容地址。
+
 官方参考：[百炼兼容接口](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)、[智谱接口](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)、[方舟接口](https://www.volcengine.com/docs/82379/1330310)、[Hindsight 配置](https://hindsight.vectorize.io/developer/configuration)、[Temporal 自托管](https://docs.temporal.io/self-hosted-guide/deployment)。
