@@ -57,4 +57,16 @@ describe('persistent event stream', () => {
     close()
     vi.unstubAllGlobals()
   })
+  it('delivers named coding progress updates without replaying an already-seen cursor', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const onEvent = vi.fn()
+    const close = openEventStream(20, onEvent, vi.fn(), vi.fn(), vi.fn())
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('coding.run_updated', { seq: 21, type: 'coding.run_updated' })
+    source.emit('coding.run_updated', { seq: 21, type: 'coding.run_updated' })
+    expect(onEvent).toHaveBeenCalledOnce()
+    expect(onEvent.mock.calls[0][0].seq).toBe(21)
+    close()
+    vi.unstubAllGlobals()
+  })
 })

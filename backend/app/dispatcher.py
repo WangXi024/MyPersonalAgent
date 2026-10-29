@@ -14,6 +14,7 @@ from app.domain.execution import ack_outbox, claim_outbox, get_dispatch_state, r
 from app.integrations.settings import runtime_settings
 from app.workflows.learning import AssistantWorkflow, GoalWorkflow, MaintenanceWorkflow, MemorySyncWorkflow
 from app.workflows.sandbox import SandboxExecutionWorkflow
+from app.workflows.coding import CodingWorkflow
 
 logger = logging.getLogger(__name__)
 CONTROL_COMMANDS = {"goal_paused", "goal_resumed", "goal_cancelled", "goal_completed",
@@ -27,6 +28,23 @@ class ConversationOrderPending(Exception):
 async def deliver(client: Client, item: dict):
     payload = dict(item["payload"])
     settings = runtime_settings()
+    if payload.get("type") in {"coding_run", "coding_run_cancelled"}:
+        workflow_id = f"coding-{payload['operation_id']}"
+        if payload["type"] == "coding_run_cancelled":
+            try:
+                await client.get_workflow_handle(workflow_id).signal(CodingWorkflow.cancel)
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+            return
+        try:
+            await client.start_workflow(CodingWorkflow.run, payload["operation_id"], id=workflow_id,
+                task_queue=settings.temporal_task_queue,
+                execution_timeout=timedelta(seconds=settings.coding_deadline_seconds + 86400 + 180),
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY)
+        except WorkflowAlreadyStartedError:
+            pass
+        return
     if payload.get("type") in {"sandbox_execution", "sandbox_execution_cancelled"}:
         workflow_id = f"sandbox-{payload['operation_id']}"
         if payload["type"] == "sandbox_execution_cancelled":

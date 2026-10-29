@@ -4,6 +4,7 @@ const eventTypes = ['business', 'business_event', 'operation.accepted', 'operati
 
 eventTypes.push('operation.research_updated')
 eventTypes.push('sandbox.execution_updated')
+eventTypes.push('coding.run_updated')
 
 /** One persisted event stream for the whole authenticated application. */
 export function openEventStream(cursor: number, onEvent: (event: Activity) => void, onState: (state: ConnectionState) => void, onReset: () => void, onReconnect: () => void) {

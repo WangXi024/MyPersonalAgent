@@ -36,6 +36,10 @@ class RuntimeSettings(BaseSettings):
     sandbox_deadline_seconds: int = Field(240, ge=60, le=900)
     sandbox_max_daily_executions: int = Field(10, ge=1, le=100)
     sandbox_max_concurrent_per_user: int = Field(2, ge=1, le=6)
+    coding_enabled: bool = False
+    coding_deadline_seconds: int = Field(1800, ge=120, le=1800)
+    coding_max_daily_runs: int = Field(5, ge=1, le=50)
+    coding_max_concurrent_per_user: int = Field(1, ge=1, le=3)
 
 
 @lru_cache

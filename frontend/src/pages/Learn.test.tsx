@@ -6,6 +6,7 @@ import { api, ApiError } from '../api/client'
 import { bootstrap, conversationModels, detail, task } from '../test/fixtures'
 import { Learn } from './Learn'
 import type { SandboxExecution } from '../api/types'
+import { codingRun } from '../test/coding-fixtures'
 const refresh = vi.fn().mockResolvedValue(undefined)
 vi.mock('../state', () => ({ useApp: () => ({ data: bootstrap, revision: 1, refresh }) }))
 vi.mock('../hooks', async importOriginal => { const original = await importOriginal<typeof import('../hooks')>(); return { ...original, useGoal: () => ({ detail, error: null }) } })
@@ -17,6 +18,7 @@ beforeEach(() => {
   detail.evaluations = []
   detail.operations = []
   detail.sandbox_executions = []
+  detail.coding_runs = []
   vi.spyOn(api, 'messages').mockResolvedValue({ items: [], last_seq: 0, read_seq: 0, has_more: false })
   vi.spyOn(api, 'conversationModels').mockResolvedValue(conversationModels)
   vi.spyOn(api, 'conversationUsage').mockResolvedValue({ requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_complete: true, estimated_cost_cny: '0.000000', cost_complete: true, pricing_known: true })
@@ -118,6 +120,38 @@ describe('learning space', () => {
     mount()
     expect(screen.getByText('user printed: passed')).toBeVisible()
     expect(screen.getByText('运行已结束')).toBeVisible()
+  })
+
+  it('starts a coding assistant only from an explicit saved-submission instruction and restores its result', async () => {
+    detail.submissions = [{ id: codingRun.submission_id, task_id: task.id, text: 'print("saved")', created_at: codingRun.created_at }]
+    detail.tasks = [{ ...task, active_submission_id: codingRun.submission_id }]
+    const create = vi.spyOn(api, 'createCodingRun').mockResolvedValue({ ...codingRun, status: 'accepted', stage: 'queued', workspace_created: false })
+    const command = vi.spyOn(api, 'command')
+    const upload = vi.spyOn(api, 'upload')
+    const user = userEvent.setup()
+    const view = mount()
+    const input = screen.getByLabelText('答案、代码或学习成果')
+    await user.type(input, 'print("draft only")')
+    await user.click(screen.getByRole('button', { name: '编码助手' }))
+    await user.type(screen.getByLabelText('希望编码助手做什么'), codingRun.instruction)
+    expect(create).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '启动编码助手' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(codingRun.submission_id, {
+      expected_version: task.state_version, expected_goal_revision: detail.goal.control_revision,
+      attachment_id: null, instruction: codingRun.instruction,
+    }, expect.any(String)))
+    detail.coding_runs = [{ ...codingRun, status: 'succeeded', stage: 'finished', summary: '请审阅这个修复方案。', cleanup_done: true, updated_at: '2026-10-29T04:05:00Z' }]
+    detail.operations = [{ id: codingRun.operation_id, goal_id: detail.goal.id, kind: 'coding_run', status: 'failed', created_at: codingRun.created_at }]
+    view.rerender(<MemoryRouter initialEntries={['/goals/goal-1/learn?task=task-1']}><Routes><Route path="/goals/:goalId/learn" element={<Learn />} /></Routes></MemoryRouter>)
+    expect(await screen.findByText('请审阅这个修复方案。')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '重试此操作' })).not.toBeInTheDocument()
+    expect(input).toHaveValue('print("draft only")')
+    expect(command).not.toHaveBeenCalled()
+    expect(upload).not.toHaveBeenCalled()
+    view.unmount()
+    mount()
+    expect(screen.getByText('请审阅这个修复方案。')).toBeVisible()
+    expect(screen.getByText('工作区已销毁')).toBeVisible()
   })
 
 })

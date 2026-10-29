@@ -1,0 +1,21 @@
+@import './sandbox-execution.css';
+.coding-run-panel{margin:12px 0 20px;min-width:0}
+.coding-panel-toggle{display:inline-flex;align-items:center;gap:6px}
+.coding-run-form{display:grid;gap:12px;padding:14px;border:1px solid var(--line);border-radius:9px;margin-top:11px;background:#fcfcfc}
+.coding-run-form>p{font-size:12px;line-height:1.8;color:var(--muted);margin:0}
+.coding-run-form>label{font-size:12px;color:#555}
+.coding-run-form textarea,.coding-run-form select{margin-top:5px;font-size:13px;max-width:100%}
+.coding-run-form>.button{justify-self:start;font-size:12px}
+.coding-run-card{padding:15px;border:1px solid var(--line);border-radius:10px;margin-top:13px;background:#fafafa;min-width:0;overflow-wrap:anywhere}
+.coding-run-card header>strong{font-size:13px;font-weight:550}
+.coding-run-status{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#555;background:#ededed;border-radius:5px;padding:2px 7px}
+.coding-run-meta{font-size:11px;color:var(--muted);line-height:1.8;margin:8px 0}
+.coding-run-instruction{font-size:12px;color:#555;line-height:1.9;margin:9px 0}
+.coding-run-card .coding-run-boundary{font-size:11px;line-height:1.9;color:#756a50;margin:10px 0}
+.coding-run-summary{font-size:13px;line-height:1.85;margin:12px 0}
+.coding-run-commands>h4{font-size:12px;margin:12px 0 8px;font-weight:550}
+.coding-command{margin:9px 0;border:1px solid var(--line);border-radius:7px;padding:10px;min-width:0;background:#fff}
+.coding-command .coding-command-text{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px!important;line-height:1.7;padding:0!important;margin:0 0 6px!important;background:transparent!important;white-space:pre-wrap;overflow-wrap:anywhere;max-height:150px;overflow:auto}
+.coding-command-meta{font-size:10px;color:var(--muted);line-height:1.7}
+.coding-workspace-state{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px;margin:12px 0 0}
+@media(max-width:720px){.coding-run-card,.coding-run-form{padding:12px}.coding-run-form textarea,.coding-run-form select{font-size:16px}}

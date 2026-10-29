@@ -144,12 +144,15 @@ async def new_operation(db, user, stream, key, kind, payload, goal=None, proacti
         "active_plan_id": goal.active_plan_id if goal else None,
     }
     usage_details = None
-    if kind in {"tutor", "plan", "assessment", "recommendation", "weekly_review"}:
+    if kind in {"tutor", "plan", "assessment", "recommendation", "weekly_review", "coding_run"}:
         from app.integrations.model_catalog import selected_model, usage_snapshot
 
         conversation = None
         if kind == "tutor" and payload.get("conversation_id"):
             conversation = await owned(db, Conversation, payload["conversation_id"], user.id)
+        elif kind == "coding_run" and goal:
+            conversation = await db.scalar(select(Conversation).where(
+                Conversation.goal_id == goal.id, Conversation.user_id == user.id))
         versions["model_alias"] = await selected_model(db, conversation.model_alias if conversation else None, snapshot=True)
         usage_details = await usage_snapshot(db, versions["model_alias"])
     op = Operation(

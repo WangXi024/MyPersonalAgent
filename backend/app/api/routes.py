@@ -314,6 +314,13 @@ async def goal_detail(goal_id: str, user=Depends(current_user)):
             SandboxExecution.goal_id == goal_id, SandboxExecution.user_id == user.id)
             .order_by(SandboxExecution.created_at.desc()).limit(100))
         result["sandbox_executions"] = [await public_execution(db, item) for item in executions]
+        from app.db.models import CodingRun
+        from app.domain.coding_runs import public_run
+
+        coding_runs = await db.scalars(select(CodingRun).where(
+            CodingRun.goal_id == goal_id, CodingRun.user_id == user.id)
+            .order_by(CodingRun.created_at.desc()).limit(30))
+        result["coding_runs"] = [await public_run(db, item) for item in coding_runs]
         attachment_ids = {identifier for item in result["submissions"] for identifier in item["attachment_ids"]}
         attachments = await db.scalars(select(Attachment).where(Attachment.id.in_(attachment_ids),
                                                                Attachment.user_id == user.id))
@@ -553,7 +560,8 @@ async def cancel_operation(operation_id: str, user=Depends(current_user)):
                     kind="temporal",
                     dedupe_key=f"operation-cancel:{op.id}",
                     payload={
-                        "type": "operation_cancelled",
+                        "type": {"coding_run": "coding_run_cancelled",
+                                 "sandbox_execution": "sandbox_execution_cancelled"}.get(op.kind, "operation_cancelled"),
                         "user_id": user.id,
                         "goal_id": op.goal_id,
                         "operation_id": op.id,

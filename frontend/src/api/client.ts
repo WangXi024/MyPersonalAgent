@@ -1,4 +1,4 @@
-import type { Accepted, Bootstrap, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, SandboxExecution, SandboxExecutionInput, Settings, User } from './types'
+import type { Accepted, Bootstrap, CodingRun, CodingRunInput, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, SandboxExecution, SandboxExecutionInput, Settings, User } from './types'
 
 let csrfToken = ''
 export class ApiError extends Error {
@@ -53,6 +53,9 @@ export const api = {
   submissionExecutions: (id: string) => request<{ items: SandboxExecution[] }>(`/submissions/${encodeURIComponent(id)}/executions`),
   sandboxExecution: (id: string) => request<SandboxExecution>(`/sandbox-executions/${encodeURIComponent(id)}`),
   cancelSandboxExecution: (id: string, key: string) => request<SandboxExecution>(`/sandbox-executions/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {}, key }),
+  createCodingRun: (id: string, body: CodingRunInput, key: string) => request<CodingRun>(`/submissions/${encodeURIComponent(id)}/coding-runs`, { method: 'POST', body, key }),
+  codingRun: (id: string) => request<CodingRun>(`/coding-runs/${encodeURIComponent(id)}`),
+  cancelCodingRun: (id: string, key: string) => request<CodingRun>(`/coding-runs/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {}, key }),
   settings: () => request<Settings>('/settings'),
   updateSettings: (body: unknown, key: string) => request<Settings>('/settings', { method: 'PATCH', body, key }),
   memories: () => request<{ items: Memory[] }>('/memories'),

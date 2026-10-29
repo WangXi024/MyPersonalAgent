@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { expect, it } from 'vitest'
 import { OperationCard } from './ui'
+import { MemoryRouter } from 'react-router-dom'
 
 it('shows a specific timeout badge and the saved-content explanation', () => {
   render(<OperationCard operation={{
@@ -30,4 +31,11 @@ it('shows the thirty-minute operation deadline on a failed chat', () => {
   }} />)
   expect(screen.getByText('处理超时', { exact: true })).toBeInTheDocument()
   expect(screen.getByText(/30 分钟时限/)).toBeInTheDocument()
+})
+
+it('links coding progress to its dedicated controls without offering generic operation cancellation', () => {
+  render(<MemoryRouter><OperationCard operation={{ id: 'coding-op', goal_id: 'goal-1', kind: 'coding_run', status: 'running', created_at: '2026-10-29T04:00:00Z' }} onCancel={() => undefined} /></MemoryRouter>)
+  expect(screen.getByText('编码助手处理提交')).toBeVisible()
+  expect(screen.getByRole('link', { name: '查看编码助手' })).toHaveAttribute('href', '/goals/goal-1/learn')
+  expect(screen.queryByRole('button', { name: '取消本次操作' })).not.toBeInTheDocument()
 })

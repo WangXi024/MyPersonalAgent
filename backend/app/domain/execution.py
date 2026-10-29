@@ -1009,6 +1009,11 @@ async def reserve_model_request(operation_id: str, limit: int = 6) -> dict:
             created = created.replace(tzinfo=timezone.utc)
         if op.status in TERMINAL:
             raise DomainError("operation_terminal", "操作已结束")
+        if op.kind == "coding_run":
+            from app.domain.coding_runs import check_model_scope
+
+            if not await check_model_scope(db, op, user, goal):
+                raise DomainError("operation_budget_closed", "编码任务的工作区授权已结束")
         if now() - created > timedelta(minutes=30):
             raise DomainError("operation_deadline", "操作超过最大执行时间")
         if op.model_requests >= min(limit, 6):
