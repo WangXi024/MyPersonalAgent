@@ -20,6 +20,7 @@ from app.db.models import (
     Operation,
     Outbox,
     Plan,
+    SandboxExecution,
     SkillProgress,
     Submission,
     Task,
@@ -230,6 +231,20 @@ async def load_context(operation_id: str) -> dict:
         submission = (
             await db.get(Submission, op.payload["submission_id"]) if op.payload.get("submission_id") else None
         )
+        execution_query = select(SandboxExecution).where(
+            SandboxExecution.user_id == user.id, SandboxExecution.goal_id == goal.id
+        ).order_by(SandboxExecution.created_at.desc()).limit(3) if goal else None
+        if execution_query is not None and submission:
+            execution_query = execution_query.where(SandboxExecution.submission_id == submission.id)
+        elif execution_query is not None and op.payload.get("task_id"):
+            execution_query = execution_query.where(SandboxExecution.task_id == op.payload["task_id"])
+        code_executions = [
+            {"id": item.id, "task_id": item.task_id, "submission_id": item.submission_id,
+             "status": item.status, "outcome": item.outcome, "evidence_type": "execution_receipt",
+             "tests_verified": False, "stdout": item.stdout[:2000], "stderr": item.stderr[:2000],
+             "cleanup_done": item.cleanup_done, "created_at": item.created_at.isoformat()}
+            for item in await db.scalars(execution_query)
+        ] if execution_query is not None else []
         plan = await db.get(Plan, goal.active_plan_id) if goal and goal.active_plan_id else None
         progress = (
             list(
@@ -390,6 +405,7 @@ async def load_context(operation_id: str) -> dict:
             "plan": plan_data,
             "tasks": task_data,
             "submission": serialize(submission) if submission else None,
+            "code_executions": code_executions,
             "attachments": attachments,
             "budgets": budgets,
             "skill_progress": [serialize(item) for item in progress],

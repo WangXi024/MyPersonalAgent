@@ -30,6 +30,7 @@ from app.db.models import (
     Plan,
     SkillProgress,
     Submission,
+    SandboxExecution,
     Task,
     now,
 )
@@ -307,6 +308,19 @@ async def goal_detail(goal_id: str, user=Depends(current_user)):
                 select(Evaluation).join(Submission).join(Task).where(Task.goal_id == goal_id)
             )
         ]
+        from app.domain.sandbox_execution import public_execution
+
+        executions = await db.scalars(select(SandboxExecution).where(
+            SandboxExecution.goal_id == goal_id, SandboxExecution.user_id == user.id)
+            .order_by(SandboxExecution.created_at.desc()).limit(100))
+        result["sandbox_executions"] = [await public_execution(db, item) for item in executions]
+        attachment_ids = {identifier for item in result["submissions"] for identifier in item["attachment_ids"]}
+        attachments = await db.scalars(select(Attachment).where(Attachment.id.in_(attachment_ids),
+                                                               Attachment.user_id == user.id))
+        names = {item.id: {"id": item.id, "filename": item.filename} for item in attachments}
+        for submission in result["submissions"]:
+            submission["attachments"] = [names[identifier] for identifier in submission["attachment_ids"]
+                                          if identifier in names]
         return result
 
 

@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.models import Base, EventStream, User
 from app.domain import commands, execution
 from app.api import auth, routes, model_configs
+from app.api import sandbox as sandbox_api
+from app.domain import sandbox_execution
 from app import main
 
 
@@ -26,7 +28,7 @@ async def database(tmp_path, monkeypatch):
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
-    for module in (commands, execution, auth, routes, model_configs, main):
+    for module in (commands, execution, auth, routes, model_configs, main, sandbox_api, sandbox_execution):
         monkeypatch.setattr(module, "SessionFactory", factory)
     async with factory() as db, db.begin():
         user = User(username="learner", password_hash=auth.password_hasher.hash("test-only-long-password"))

@@ -1,4 +1,4 @@
-import type { Accepted, Bootstrap, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, Settings, User } from './types'
+import type { Accepted, Bootstrap, Conversation, ConversationModels, GoalDetail, GoalDraft, GoalInput, Memory, MessagesResponse, ModelConfig, ModelConfigInput, ModelConfigs, ModelUsageData, Operation, SandboxExecution, SandboxExecutionInput, Settings, User } from './types'
 
 let csrfToken = ''
 export class ApiError extends Error {
@@ -49,6 +49,10 @@ export const api = {
   goalDrafts: (id: string) => request<{ items: GoalDraft[] }>(`/conversations/${encodeURIComponent(id)}/goal-drafts`),
   acceptGoalDraft: (id: string, body: GoalInput, key: string) => request<Accepted>(`/goal-drafts/${encodeURIComponent(id)}/accept`, { method: 'POST', body, key }),
   operation: (id: string) => request<Operation>(`/operations/${encodeURIComponent(id)}`),
+  runSubmission: (id: string, body: SandboxExecutionInput, key: string) => request<SandboxExecution>(`/submissions/${encodeURIComponent(id)}/executions`, { method: 'POST', body, key }),
+  submissionExecutions: (id: string) => request<{ items: SandboxExecution[] }>(`/submissions/${encodeURIComponent(id)}/executions`),
+  sandboxExecution: (id: string) => request<SandboxExecution>(`/sandbox-executions/${encodeURIComponent(id)}`),
+  cancelSandboxExecution: (id: string, key: string) => request<SandboxExecution>(`/sandbox-executions/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {}, key }),
   settings: () => request<Settings>('/settings'),
   updateSettings: (body: unknown, key: string) => request<Settings>('/settings', { method: 'PATCH', body, key }),
   memories: () => request<{ items: Memory[] }>('/memories'),

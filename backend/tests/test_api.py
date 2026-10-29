@@ -16,10 +16,10 @@ async def test_readiness_requires_the_current_migration(database):
             await db.execute(text("INSERT INTO alembic_version VALUES ('0002_general_chat')"))
         assert (await client.get("/health/ready")).status_code == 503
         async with factory() as db, db.begin():
-            await db.execute(text("UPDATE alembic_version SET version_num = '0005_model_usage'"))
+            await db.execute(text("UPDATE alembic_version SET version_num = '0006_sandbox_execution'"))
         response = await client.get("/health/ready")
         assert response.status_code == 200
-        assert response.json()["migration"] == "0005_model_usage"
+        assert response.json()["migration"] == "0006_sandbox_execution"
 
 
 async def test_auth_csrf_and_untrusted_origin(database):

@@ -28,6 +28,14 @@ class RuntimeSettings(BaseSettings):
     research_allowed_domains: str = ""
     research_fetch_max_bytes: int = Field(262144, ge=16384, le=1048576)
     research_fetch_max_chars: int = Field(12000, ge=1000, le=20000)
+    sandbox_enabled: bool = False
+    sandbox_address: str = "host.docker.internal:18443"
+    sandbox_rpc_timeout_seconds: float = Field(10, ge=1, le=30)
+    sandbox_execution_timeout_seconds: int = Field(30, ge=1, le=120)
+    sandbox_memory_mb: int = Field(256, ge=128, le=1024)
+    sandbox_deadline_seconds: int = Field(240, ge=60, le=900)
+    sandbox_max_daily_executions: int = Field(10, ge=1, le=100)
+    sandbox_max_concurrent_per_user: int = Field(2, ge=1, le=6)
 
 
 @lru_cache

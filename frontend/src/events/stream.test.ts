@@ -45,4 +45,16 @@ describe('persistent event stream', () => {
     expect(reset).toHaveBeenCalledOnce()
     vi.unstubAllGlobals()
   })
+  it('accepts named sandbox updates and deduplicates their persisted cursor', () => {
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const onEvent = vi.fn()
+    const close = openEventStream(10, onEvent, vi.fn(), vi.fn(), vi.fn())
+    const source = FakeEventSource.instances.at(-1)!
+    source.emit('sandbox.execution_updated', { seq: 11, type: 'sandbox.execution_updated' })
+    source.emit('sandbox.execution_updated', { seq: 11, type: 'sandbox.execution_updated' })
+    expect(onEvent).toHaveBeenCalledOnce()
+    expect(onEvent.mock.calls[0][0].seq).toBe(11)
+    close()
+    vi.unstubAllGlobals()
+  })
 })

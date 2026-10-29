@@ -5,12 +5,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../api/client'
 import { bootstrap, conversationModels, detail, task } from '../test/fixtures'
 import { Learn } from './Learn'
+import type { SandboxExecution } from '../api/types'
 const refresh = vi.fn().mockResolvedValue(undefined)
 vi.mock('../state', () => ({ useApp: () => ({ data: bootstrap, revision: 1, refresh }) }))
 vi.mock('../hooks', async importOriginal => { const original = await importOriginal<typeof import('../hooks')>(); return { ...original, useGoal: () => ({ detail, error: null }) } })
 
 beforeEach(() => {
   detail.tasks = [task]
+  detail.goal = { ...bootstrap.goals[0] }
+  detail.submissions = []
+  detail.evaluations = []
+  detail.operations = []
+  detail.sandbox_executions = []
   vi.spyOn(api, 'messages').mockResolvedValue({ items: [], last_seq: 0, read_seq: 0, has_more: false })
   vi.spyOn(api, 'conversationModels').mockResolvedValue(conversationModels)
   vi.spyOn(api, 'conversationUsage').mockResolvedValue({ requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, usage_complete: true, estimated_cost_cny: '0.000000', cost_complete: true, pricing_known: true })
@@ -82,6 +88,36 @@ describe('learning space', () => {
     expect(upload.mock.calls[0][0]).toBe(file)
     expect(upload.mock.calls[0][1]).toBe(upload.mock.calls[1][1])
     expect(screen.getByText('notes.txt')).toBeInTheDocument()
+  })
+
+  it('runs the saved submission rather than unsaved editor text and restores real execution updates', async () => {
+    const saved = { id: 'saved-python', task_id: task.id, text: 'print("saved code")', created_at: '2026-10-29T02:00:00Z' }
+    detail.submissions = [saved]
+    detail.tasks = [{ ...task, active_submission_id: saved.id }]
+    const execution: SandboxExecution = { id: 'run-1', operation_id: 'sandbox-op', goal_id: detail.goal.id, task_id: task.id,
+      submission_id: saved.id, request_id: 'request-1', language: 'python', status: 'accepted', phase: 'queued', outcome: '',
+      stdout: '', stderr: '', cleanup_done: false, delivery_done: false, artifacts: [], error_code: null, error_message: null,
+      created_at: '2026-10-29T02:01:00Z', updated_at: '2026-10-29T02:01:00Z' }
+    const run = vi.spyOn(api, 'runSubmission').mockResolvedValue(execution)
+    const user = userEvent.setup()
+    const view = mount()
+    await user.type(screen.getByLabelText('答案、代码或学习成果'), 'print("not saved yet")')
+    expect(run).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '运行代码' }))
+    await waitFor(() => expect(run).toHaveBeenCalledWith(saved.id, { expected_version: task.state_version, expected_goal_revision: detail.goal.control_revision, language: 'python', attachment_id: null }, expect.any(String)))
+    expect(screen.getByLabelText('答案、代码或学习成果')).toHaveValue('print("not saved yet")')
+    detail.sandbox_executions = [{ ...execution, status: 'succeeded', phase: 'finished', outcome: 'success', stdout: 'user printed: passed', cleanup_done: true, delivery_done: true, updated_at: '2026-10-29T02:02:00Z' }]
+    detail.operations = [{ id: execution.operation_id, goal_id: detail.goal.id, kind: 'sandbox_execution', status: 'failed', created_at: execution.created_at }]
+    view.rerender(<MemoryRouter initialEntries={['/goals/goal-1/learn?task=task-1']}><Routes><Route path="/goals/:goalId/learn" element={<Learn />} /></Routes></MemoryRouter>)
+    expect(await screen.findByText('user printed: passed')).toBeVisible()
+    expect(screen.getByText('运行已结束')).toBeVisible()
+    expect(screen.getByText('隔离环境已清理')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '重试此操作' })).not.toBeInTheDocument()
+    expect(screen.queryByText('符合本次要求')).not.toBeInTheDocument()
+    view.unmount()
+    mount()
+    expect(screen.getByText('user printed: passed')).toBeVisible()
+    expect(screen.getByText('运行已结束')).toBeVisible()
   })
 
 })

@@ -183,6 +183,49 @@ class StudyRecord(Entity, Base):
     __table_args__ = (UniqueConstraint("user_id", "attempt_id"),)
 
 
+class SandboxExecution(Entity, Base):
+    __tablename__ = "sandbox_executions"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    goal_id: Mapped[str] = mapped_column(ForeignKey("goals.id"), index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), index=True)
+    operation_id: Mapped[str] = mapped_column(ForeignKey("operations.id"), unique=True)
+    attachment_id: Mapped[str | None] = mapped_column(ForeignKey("attachments.id"))
+    request_id: Mapped[str] = mapped_column(String(64), unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    code: Mapped[str] = mapped_column(Text)
+    limits: Mapped[dict] = mapped_column(J)
+    goal_revision: Mapped[int] = mapped_column(Integer)
+    requirements_version: Mapped[int] = mapped_column(Integer)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    language: Mapped[str] = mapped_column(String(20), default="python")
+    status: Mapped[str] = mapped_column(String(30), default="accepted")
+    phase: Mapped[str] = mapped_column(String(30), default="queued")
+    outcome: Mapped[str] = mapped_column(String(30), default="")
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result_saved: Mapped[bool] = mapped_column(Boolean, default=False)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    cleanup_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    stdout: Mapped[str] = mapped_column(Text, default="")
+    stderr: Mapped[str] = mapped_column(Text, default="")
+    resource_usage: Mapped[dict] = mapped_column(J, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SandboxArtifact(Entity, Base):
+    __tablename__ = "sandbox_artifacts"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey("sandbox_executions.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(1024))
+    storage_key: Mapped[str] = mapped_column(String(160), unique=True)
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    __table_args__ = (UniqueConstraint("execution_id", "filename"),)
+
+
 class Evaluation(Entity, Base):
     __tablename__ = "evaluations"
     submission_id: Mapped[str] = mapped_column(ForeignKey("submissions.id"), index=True)

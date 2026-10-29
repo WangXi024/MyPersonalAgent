@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from datetime import timedelta
 from uuid import uuid4
 
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
@@ -12,6 +13,7 @@ from temporalio.service import RPCError, RPCStatusCode
 from app.domain.execution import ack_outbox, claim_outbox, get_dispatch_state, retry_outbox
 from app.integrations.settings import runtime_settings
 from app.workflows.learning import AssistantWorkflow, GoalWorkflow, MaintenanceWorkflow, MemorySyncWorkflow
+from app.workflows.sandbox import SandboxExecutionWorkflow
 
 logger = logging.getLogger(__name__)
 CONTROL_COMMANDS = {"goal_paused", "goal_resumed", "goal_cancelled", "goal_completed",
@@ -25,6 +27,23 @@ class ConversationOrderPending(Exception):
 async def deliver(client: Client, item: dict):
     payload = dict(item["payload"])
     settings = runtime_settings()
+    if payload.get("type") in {"sandbox_execution", "sandbox_execution_cancelled"}:
+        workflow_id = f"sandbox-{payload['operation_id']}"
+        if payload["type"] == "sandbox_execution_cancelled":
+            try:
+                await client.get_workflow_handle(workflow_id).signal(SandboxExecutionWorkflow.cancel)
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+            return
+        try:
+            await client.start_workflow(SandboxExecutionWorkflow.run, payload["operation_id"],
+                id=workflow_id, task_queue=settings.temporal_task_queue,
+                execution_timeout=timedelta(seconds=settings.sandbox_deadline_seconds + 180),
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY)
+        except WorkflowAlreadyStartedError:
+            pass
+        return
     if item["kind"] == "memory":
         try:
             await client.start_workflow(MemorySyncWorkflow.run,
