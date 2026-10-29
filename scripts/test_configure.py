@@ -42,8 +42,10 @@ class ConfigurationTests(unittest.TestCase):
         first = Path(".secrets/app_db_password").read_bytes()
         self.run_configure()
         self.assertEqual(first, Path(".secrets/app_db_password").read_bytes())
-        self.assertEqual(Path(".secrets").stat().st_mode & 0o777, 0o700)
-        self.assertEqual(Path(".env").stat().st_mode & 0o777, 0o600)
+        # Windows uses ACLs; st_mode does not express POSIX owner-only permissions.
+        if os.name != "nt":
+            self.assertEqual(Path(".secrets").stat().st_mode & 0o777, 0o700)
+            self.assertEqual(Path(".env").stat().st_mode & 0o777, 0o600)
 
     def test_http_cannot_bind_public_interfaces(self):
         Path(".env").write_text(self.text.replace("APP_BIND_HOST=127.0.0.1", "APP_BIND_HOST=0.0.0.0"))

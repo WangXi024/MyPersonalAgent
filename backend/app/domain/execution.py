@@ -530,6 +530,11 @@ async def commit_result(operation_id: str, result: dict) -> dict:
             return public_operation(op)
         if result.get("kind", op.kind) != op.kind:
             raise DomainError("invalid_result", "Agent 输出类型与操作不符", 422)
+        from app.agents.ui import build_ui_components
+
+        research_sources = op.result.get("research_sources", [])
+        research_calls = op.result.get("research_calls", {})
+        ui_components = build_ui_components(result.get("ui_components", []), research_sources)
         draft = result.get("goal_draft")
         if draft is not None:
             if not global_tutor or result.get("follow_up") is not None:
@@ -718,6 +723,12 @@ async def commit_result(operation_id: str, result: dict) -> dict:
         )
         op.status, op.stage, op.updated_at = "succeeded", "saved", now()
         op.result = {"resource_id": resource_id, "message_id": msg.id}
+        if research_sources:
+            op.result = {**op.result, "research_sources": research_sources}
+        if research_calls:
+            op.result = {**op.result, "research_calls": research_calls}
+        if ui_components:
+            op.result = {**op.result, "ui_components": ui_components}
         if action_receipts:
             op.result = {**op.result, "actions": action_receipts}
         if draft is not None:

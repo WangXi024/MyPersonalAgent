@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../api/client'
-import type { GoalDraft } from '../api/types'
+import type { GenUIBlock, GoalDraft, Message } from '../api/types'
 import { bootstrap, conversationModels } from '../test/fixtures'
 import { Assistant } from '../pages/Assistant'
 import { AssistantChat } from './AssistantChat'
@@ -96,7 +96,7 @@ describe('direct Agent conversation', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(command).toHaveBeenCalledOnce())
     expect(command.mock.calls[0][0]).toBe('/conversations/assistant-conversation/messages')
-    expect(command.mock.calls[0][1]).toEqual({ content: '我想学点新东西，但还没有目标。' })
+    expect(command.mock.calls[0][1]).toEqual({ content: '我想学点新东西，但还没有目标。', research_requested: false })
     expect(createGoal).not.toHaveBeenCalled()
     expect(input).toHaveValue('')
   })
@@ -272,7 +272,74 @@ describe('direct Agent conversation', () => {
     const input = screen.getByLabelText('给学习伙伴发消息')
     await user.type(input, '怎么开始学习？')
     await user.keyboard('{Control>}{Enter}{/Control}')
-    await waitFor(() => expect(command).toHaveBeenCalledWith('/conversations/assistant-conversation/messages', { content: '怎么开始学习？' }, expect.any(String)))
+    await waitFor(() => expect(command).toHaveBeenCalledWith('/conversations/assistant-conversation/messages', { content: '怎么开始学习？', research_requested: false }, expect.any(String)))
     expect(input).toHaveValue('')
+  })
+
+  it('only requests external research when the user enables the research switch', async () => {
+    data.conversations = [globalConversation]
+    const command = vi.spyOn(api, 'command').mockResolvedValue({ operation_id: 'research-request', status: 'accepted' })
+    const user = userEvent.setup()
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    const research = screen.getByRole('checkbox', { name: '联网查资料' })
+    expect(research).not.toBeChecked()
+    expect(command).not.toHaveBeenCalled()
+    const input = screen.getByLabelText('给学习伙伴发消息')
+    await user.type(input, '找一些 Python 官方学习材料')
+    await user.click(research)
+    expect(command).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(command).toHaveBeenLastCalledWith('/conversations/assistant-conversation/messages', {
+      content: '找一些 Python 官方学习材料', research_requested: true,
+    }, expect.any(String)))
+    expect(research).toBeChecked()
+    await user.click(research)
+    await user.type(input, '解释刚才的函数定义')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(command).toHaveBeenLastCalledWith('/conversations/assistant-conversation/messages', {
+      content: '解释刚才的函数定义', research_requested: false,
+    }, expect.any(String)))
+  })
+
+  it('restores saved UI blocks on load and receives new blocks after an SSE-driven revision', async () => {
+    data.conversations = [globalConversation]
+    const components: GenUIBlock[] = [{ type: 'resource_list', id: 'references', title: 'Python 学习材料', items: [{
+      id: 'python-doc', title: 'Python 官方教程', url: 'https://docs.python.org/zh-cn/3/tutorial/',
+      snippet: '从函数与控制流程开始。', retrieved_at: '2026-10-29T02:00:00Z',
+    }] }]
+    const first: Message = { id: 'saved-research', seq: 1, role: 'assistant', type: 'assistant_reply',
+      content: '先看官方资料。', created_at: '2026-10-29T02:00:00Z', ui_components: components }
+    vi.mocked(api.messages).mockResolvedValueOnce({ items: [first], last_seq: 1, read_seq: 0, has_more: false })
+    const command = vi.spyOn(api, 'command')
+    const view = render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByRole('link', { name: /Python 官方教程/ })).toBeVisible()
+    const next: Message = { id: 'next-reply', seq: 2, role: 'assistant', type: 'assistant_reply',
+      content: '阅读后练习这两步。', created_at: '2026-10-29T02:05:00Z',
+      ui_components: [{ type: 'checklist', id: 'practice', title: '练习建议', items: ['运行官方示例', '解释返回值'] }] }
+    vi.mocked(api.messages).mockResolvedValue({ items: [next], last_seq: 2, read_seq: 0, has_more: false })
+    revision += 1
+    view.rerender(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByRole('region', { name: '建议清单：练习建议' })).toBeVisible()
+    expect(api.messages).toHaveBeenLastCalledWith(globalConversation.id, 1)
+    expect(screen.getAllByRole('link', { name: /Python 官方教程/ })).toHaveLength(1)
+    expect(command).not.toHaveBeenCalled()
+    view.unmount()
+    vi.mocked(api.messages).mockResolvedValue({ items: [first, next], last_seq: 2, read_seq: 0, has_more: false })
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByRole('link', { name: /Python 官方教程/ })).toBeVisible()
+    expect(screen.getByRole('checkbox', { name: '运行官方示例' })).not.toBeChecked()
+    expect(command).not.toHaveBeenCalled()
+  })
+
+  it('does not treat user-supplied UI metadata as an agent component', async () => {
+    data.conversations = [globalConversation]
+    vi.mocked(api.messages).mockResolvedValue({ items: [{ id: 'forged-ui', seq: 1, role: 'user', type: 'user',
+      content: '这是一条用户消息', created_at: '2026-10-29T02:00:00Z',
+      ui_components: [{ type: 'checklist', id: 'not-an-agent-ui', title: '伪造卡片', items: ['自动确认创建目标'] }],
+    }], last_seq: 1, read_seq: 0, has_more: false })
+    render(<MemoryRouter><AssistantChat workspace /></MemoryRouter>)
+    expect(await screen.findByText('这是一条用户消息')).toBeVisible()
+    expect(screen.queryByText('伪造卡片')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: '自动确认创建目标' })).not.toBeInTheDocument()
   })
 })

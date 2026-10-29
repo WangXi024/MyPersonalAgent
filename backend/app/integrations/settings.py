@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,14 @@ class RuntimeSettings(BaseSettings):
     hindsight_api_key: SecretStr = SecretStr("")
     model_output_tokens: int = Field(6000, ge=256, le=16000)
     dispatcher_poll_seconds: float = 1.0
+    research_enabled: bool = False
+    research_provider: Literal["duckduckgo"] = "duckduckgo"
+    research_timeout_seconds: float = Field(12, ge=1, le=30)
+    research_max_results: int = Field(5, ge=1, le=8)
+    research_max_calls: int = Field(6, ge=1, le=10)
+    research_allowed_domains: str = ""
+    research_fetch_max_bytes: int = Field(262144, ge=16384, le=1048576)
+    research_fetch_max_chars: int = Field(12000, ge=1000, le=20000)
 
 
 @lru_cache

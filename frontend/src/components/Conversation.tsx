@@ -11,6 +11,7 @@ import { GoalDraftCard } from './GoalDraftCard'
 import { GoalActionReceipt } from './GoalActionReceipt'
 import { MarkdownMessage } from './MarkdownMessage'
 import { ModelUsage } from './ModelUsage'
+import { GenerativeUI } from './generative/GenerativeUI'
 
 interface Props {
   conversationId: string | null
@@ -40,6 +41,7 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
   const [goalDrafts, setGoalDrafts] = useState<GoalDraft[]>([])
   const [draftsError, setDraftsError] = useState<Error | null>(null)
   const [message, setMessage] = useState(initialMessage)
+  const [researchRequested, setResearchRequested] = useState(false)
   const [visibleEnd, setVisibleEnd] = useState(false)
   const chatEnd = useRef<HTMLDivElement>(null)
   const chatPane = useRef<HTMLDivElement>(null)
@@ -131,7 +133,7 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault()
     if (!message.trim() || !conversationId || !canSend || modelAction.pending || !modelAvailable) return
-    const body = { content: message.trim(), ...(goalId && taskId ? { task_id: taskId } : {}) }
+    const body = { content: message.trim(), research_requested: researchRequested, ...(goalId && taskId ? { task_id: taskId } : {}) }
     const result = await messageAction.run(JSON.stringify(body), key => api.command(`/conversations/${conversationId}/messages`, body, key))
     if (result) { setMessage(''); scrollOnLoad.current = true }
   }
@@ -155,7 +157,7 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
       const linkedGoal = goalId ?? data?.tasks.find(task => task.id === item.task_id)?.goal_id
       const draft = !goalId && item.role === 'assistant' ? goalDrafts.find(proposal => proposal.message_id === item.id) : undefined
       const operation = item.role === 'user' ? running.find(operation => operation.id === item.operation_id) : undefined
-      return <Fragment key={item.id}><article className={`chat-message ${item.role === 'user' ? 'from-user' : 'from-agent'}`}><div className="message-author">{item.role === 'user' ? '你' : '学习伙伴'}{item.type === 'proactive' && <span>主动建议</span>}<time>{timeLabel(item.created_at, data?.user.timezone)}</time></div><div className="message-bubble">{item.role === 'user' ? <p className="preserve-text">{item.content}</p> : <MarkdownMessage content={item.content} />}{item.task_id && linkedGoal && item.role !== 'user' && <Link className="message-task-link" to={`/goals/${linkedGoal}/learn?task=${item.task_id}`}>查看关联任务 <ArrowUpRight size={13} /></Link>}</div>{draft && <GoalDraftCard key={draft.operation_id} proposal={draft} />}{item.role === 'assistant' && item.actions?.map((result, index) => <GoalActionReceipt key={`${item.id}/${index}`} result={result} retrySourceId={index === 0 && item.actions?.every(action => action.status === 'blocked') ? item.operation_id : null} />)}{item.role === 'assistant' && <ModelUsage usage={item.usage} />}</article>{operation && renderOperation(operation)}</Fragment>
+      return <Fragment key={item.id}><article className={`chat-message ${item.role === 'user' ? 'from-user' : 'from-agent'}`}><div className="message-author">{item.role === 'user' ? '你' : '学习伙伴'}{item.type === 'proactive' && <span>主动建议</span>}<time>{timeLabel(item.created_at, data?.user.timezone)}</time></div><div className="message-bubble">{item.role === 'user' ? <p className="preserve-text">{item.content}</p> : <MarkdownMessage content={item.content} />}{item.task_id && linkedGoal && item.role !== 'user' && <Link className="message-task-link" to={`/goals/${linkedGoal}/learn?task=${item.task_id}`}>查看关联任务 <ArrowUpRight size={13} /></Link>}</div>{item.role === 'assistant' && <GenerativeUI blocks={item.ui_components} timezone={data?.user.timezone} />}{draft && <GoalDraftCard key={draft.operation_id} proposal={draft} />}{item.role === 'assistant' && item.actions?.map((result, index) => <GoalActionReceipt key={`${item.id}/${index}`} result={result} retrySourceId={index === 0 && item.actions?.every(action => action.status === 'blocked') ? item.operation_id : null} />)}{item.role === 'assistant' && <ModelUsage usage={item.usage} />}</article>{operation && renderOperation(operation)}</Fragment>
     }) : <div className="chat-empty">{!workspace && <Sparkles size={28} />}<h3>{workspace ? '今天想学什么？' : goalId ? '不用一个人摸索。' : '想学什么，我们一起聊清楚。'}</h3><p>{workspace ? '说说你的目标，或遇到的问题。' : goalId ? '可以问一个问题，聊聊你卡住的地方，或者告诉我今天有多少时间。' : '说说你的兴趣、困惑，或者今天的学习状态。Agent 可以帮你整理目标草稿，修改并确认后，再一起准备计划。'}</p>{!goalId && <div className="chat-starters"><button type="button" disabled={messageAction.pending} onClick={() => setMessage('我想学点新东西，但还没想好从哪里开始。')}>还没想好学什么</button><button type="button" disabled={messageAction.pending} onClick={() => setMessage('我今天只有 15 分钟，怎样安排学习比较合适？')}>今天只有 15 分钟</button></div>}</div>}<ErrorNotice error={operationAction.error} /><div ref={chatEnd} className="chat-end" /></div>
     {!visibleEnd && messages.length > 0 && <button className="latest-message" onClick={() => { if (chatPane.current) chatPane.current.scrollTo({ top: chatPane.current.scrollHeight, behavior: 'smooth' }) }}>查看最新消息 ↓</button>}
     <form className="chat-composer" onSubmit={sendMessage}><ErrorNotice error={messageAction.error} /><ErrorNotice error={modelsError} retry={() => void refresh()} /><ErrorNotice error={modelAction.error} /><label className="sr-only" htmlFor={`chat-input-${goalId ?? 'assistant'}`}>给学习伙伴发消息</label><textarea id={`chat-input-${goalId ?? 'assistant'}`} disabled={!canSend || messageAction.pending} value={message} onChange={event => setMessage(event.target.value)} rows={workspace || compact ? 2 : 3} maxLength={10000} placeholder={canSend ? workspace ? '给 Agent 发消息…' : goalId ? '提个问题，或告诉我你现在的想法…' : '直接和 Agent 说说，你今天想学什么？' : '目标已结束，历史对话仍可查看。'} onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="composer-model-row">
@@ -166,6 +168,6 @@ export function Conversation({ conversationId, goalId, taskId, operations, canSe
       </select></label>
       <small id={`model-hint-${goalId ?? 'assistant'}`}>{modelAction.pending ? '正在切换…' : models?.items.length === 1 ? '当前仅配置一个模型' : '用于当前对话的新回复'}</small>
       {data?.user.can_manage_models && <Link className="text-button model-settings-link" to="/settings/models">配置模型</Link>}
-    </div><div className="row spread"><small>{conversationId ? 'Ctrl / ⌘ + Enter 发送' : connectionError ? '对话暂未连接，请重试。' : '正在连接对话…'}</small><button className="send-button" aria-label="发送消息" disabled={messageAction.pending || modelAction.pending || !modelAvailable || !message.trim() || !canSend || !conversationId}>{messageAction.pending ? <LoaderCircle className="spin" size={18} /> : <ArrowUp size={20} />}</button></div><p>{workspace ? '对话和学习进度会持续保存。' : '消息会持续保存，关闭页面后也不会丢失。'}</p></form>
+    </div><div className="row spread"><div className="genui-composer-options"><label className="genui-research-toggle"><input type="checkbox" checked={researchRequested} disabled={!canSend || messageAction.pending} onChange={event => setResearchRequested(event.target.checked)} />联网查资料</label><small>{conversationId ? 'Ctrl / ⌘ + Enter 发送' : connectionError ? '对话暂未连接，请重试。' : '正在连接对话…'}</small></div><button className="send-button" aria-label="发送消息" disabled={messageAction.pending || modelAction.pending || !modelAvailable || !message.trim() || !canSend || !conversationId}>{messageAction.pending ? <LoaderCircle className="spin" size={18} /> : <ArrowUp size={20} />}</button></div><p>{workspace ? '对话和学习进度会持续保存。' : '消息会持续保存，关闭页面后也不会丢失。'}</p></form>
   </section>
 }

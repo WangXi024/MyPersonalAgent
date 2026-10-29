@@ -3,11 +3,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.agents.ui import DisplayProposal
+
 
 class Proposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: str = Field(min_length=1, max_length=2000)
     message: str = Field(min_length=1, max_length=12000)
+    ui_components: list[DisplayProposal] = Field(default_factory=list, max_length=6)
 
 
 class MilestoneProposal(BaseModel):

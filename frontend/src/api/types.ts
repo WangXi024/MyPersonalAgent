@@ -10,7 +10,11 @@ export interface Evaluation { id: string; submission_id: string; passed: boolean
 export interface Submission { id: string; task_id: string; text: string; created_at: string; attachment_ids?: string[] }
 export interface GoalActionResult { kind: 'retry_plan' | 'replan' | 'update_goal' | 'cancel_goal'; status: 'applied' | 'blocked'; goal_id: string | null; goal_title: string; operation_id: string | null; message: string; changes?: { deadline?: string; background?: string; outcome?: string; criteria?: string[] } }
 export interface ModelUsageData { model_name?: string | null; model_id?: string | null; provider?: 'bailian' | 'zhipu' | 'ark' | 'gateway' | null; requests: number; input_tokens: number; output_tokens: number; total_tokens: number; usage_complete: boolean; estimated_cost_cny: string | null; cost_complete: boolean; pricing_known: boolean }
-export interface Message { usage?: ModelUsageData | null; id: string; seq: number; role: string; type: string; content: string; task_id?: string | null; operation_id?: string | null; created_at: string; actions?: GoalActionResult[] }
+export interface ResourceListItem { id: string; title: string; url: string; snippet: string; retrieved_at: string }
+export interface ResourceListBlock { type: 'resource_list'; id: string; title: string; items: ResourceListItem[] }
+export interface ChecklistBlock { type: 'checklist'; id: string; title: string; items: string[] }
+export type GenUIBlock = ResourceListBlock | ChecklistBlock
+export interface Message { usage?: ModelUsageData | null; id: string; seq: number; role: string; type: string; content: string; task_id?: string | null; operation_id?: string | null; created_at: string; actions?: GoalActionResult[]; ui_components?: GenUIBlock[] }
 export interface Operation { usage?: ModelUsageData; id: string; kind: string; status: OperationStatus; goal_id: string | null; stage?: string | null; error_code?: string | null; error_message?: string | null; created_at: string; updated_at?: string }
 export interface Activity { seq: number; type: string; summary: string; goal_id?: string | null; operation_id?: string | null; created_at: string }
 export interface DailyBudget { local_date: string; authorized_minutes: number; consumed_minutes: number; reserved_minutes: number }

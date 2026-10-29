@@ -107,6 +107,7 @@ class SubmissionInput(VersionInput):
 class MessageInput(BaseModel):
     content: str = Field(min_length=1, max_length=16000)
     task_id: str | None = None
+    research_requested: bool = Field(default=False, strict=True)
 
 
 class ReadInput(BaseModel):
@@ -420,6 +421,9 @@ async def messages(
             "items": [{**serialize(item), "usage": public_usage(operations[item.operation_id])
                        if item.role == "assistant" and item.operation_id in operations else None, "actions": (
                 operations[item.operation_id].result.get("actions", [])
+                if item.role == "assistant" and item.operation_id in operations else []
+            ), "ui_components": (
+                operations[item.operation_id].result.get("ui_components", [])
                 if item.role == "assistant" and item.operation_id in operations else []
             )} for item in items],
             "last_seq": conversation.last_seq,

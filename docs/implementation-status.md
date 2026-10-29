@@ -1,6 +1,32 @@
 # 实现与验收状态
 
-更新日期：2026-10-21。对应开发文档 v0.3；本文件区分代码实现、基础设施实测和真实模型验收，不代表所有 A01–A27 已通过。
+更新日期：2026-10-29。对应开发文档 v0.3 及本次增量阶段；本文件区分代码实现、基础设施实测和真实模型验收，不代表所有 A01–A27 已通过。
+
+## 增量开发阶段（2026-10-29）
+
+用户授权使用多个 sub agent，分阶段完成联网检索、自研 sandbox/Coder、实时语音与组件型 Generative UI。保持 React + TypeScript + Vite、Pydantic AI、Temporal、Hindsight 与现有业务确认流程。生成式界面采用注册组件与结构化参数；语音先交付接入与配置界面，供应商由用户后续选择。
+
+| 阶段 | 范围 | 当前状态与验收门槛 |
+| --- | --- | --- |
+| 一 | Windows 环境、WebSearch/WebFetch、组件型 UI | 已实现并部署至本机；后端 123 通过/26 跳过，配置 8/8、Temporal 16/16；前端全套 74 测试及 Unicode 修复后定向 17 测试通过；真实搜索、网页读取与受限模型资料卡联调通过 |
+| 二 | 自研 sandbox AMD64 适配、RPC 客户端与受控代码评估、Coder 工作区 | 待实施；先完成执行/取消/超时/结果校验/保存后 ACK，再验证多轮文件状态，不能用 AI 审阅冒充程序测试 |
+| 三 | 实时语音会话与配置界面、学习工作流交接 | 待实施；供应商暂未选择，未配置凭据时不建立计费会话；正式计划与评估仍经过现有结构化业务流程 |
+| 四 | 教学 Skills、历史检索与压缩、工具输出限制、文档与报告 | 待实施；按可独立验收功能逐项交付 |
+| 后续 | Advisor | 暂缓；官方本地回退当前不支持持久执行，需要先验证原生路线与用量统计 |
+
+阶段一新增 `research_requested`：聊天输入默认关闭“联网查资料”，本次开启后才允许 tutor 对外搜索/读取；查询只发送必要主题词。部署同时需 `RESEARCH_ENABLED=true`。联网调用使用官方 `WebSearch`/`WebFetch` 的自定义 local 工具，保留 Temporal 活动执行、操作作用域、次数限制和去重缓存；不用现有网关冒充原生搜索。
+
+模型可通过 `ui_components` 选择 `resource_list` 和 `checklist`。来源卡片只接受本次实际联网结果的 ID，再由服务端补齐地址和摘要；清单勾选是临时阅读标记，不改变学习任务或掌握状态。组件随成功消息持久保存，刷新后恢复内容。HTML/JS、任意 API 和模型自填来源地址不属于组件协议。
+
+升级使用 `learning-research-ui-v1` Temporal patch marker，保留 v1 Agent 活动名供旧历史回放，新执行采用 v2 Agent。Pydantic AI 保持锁定 2.57.0；Harness 尚未作为阶段一依赖安装。Windows 的开发环境使用本地忽略目录 `.local/venv-backend`，避免覆盖旧 macOS 虚拟环境，并安装条件依赖 tzdata。
+
+阶段一验收记录：
+
+- Windows：后端 pytest 123 通过、26 集成测试因地址未配置而跳过；Ruff 通过；配置脚本 8/8。随后在真实 Docker Temporal 上执行 `test_research_temporal.py` 与 `test_runtime_temporal.py`，16/16 通过，覆盖 v2 联网调用及 UI 持久化、v1 历史回放、故障恢复；这些 Temporal 测试中的模型/搜索响应为模拟。
+- 前端：TypeScript、ESLint、74 项测试和生产构建通过；复核修复 Unicode code point 与 JavaScript UTF-16 长度不一致后，定向组件测试 17/17、SSE 2/2 及 TypeScript 通过；最终 Docker 前端构建成功。
+- 真实外网：Windows 与容器均验证 DuckDuckGo 返回 5 条来源，官方 Python 教程读取 7169 字符；容器首次请求曾临时失败，后续不改配置复测成功。未修改全局 Docker/DNS/代理。
+- 真实模型：使用当前配置的网关模型，独立临时 SQLite 验证两次模型调用（10582 输入、415 输出 Token）完成搜索并保存 `resource_list`；未创建生产学习记录。该检查实际使用已配置模型额度。
+- 本机部署：`http://localhost:8080` 的 live/ready、前端静态资源、联网选择、登录/bootstrap/退出均通过；应用 Worker 的真实 Temporal 定时器与活动烟测通过。9 个长期服务运行，其中 7 个健康检查通过，Worker/Dispatcher 无独立 healthcheck。没有部署自研 sandbox，也未开启语音会话。
 
 ## 已实现
 
