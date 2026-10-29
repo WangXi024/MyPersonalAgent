@@ -166,7 +166,7 @@ Coder 需要支持 `WorkspaceService` 的自研节点，不能只提供旧的一
 
 ## 11. 样例验证与资料解析
 
-第五阶段需要先备份并迁移至 `0009_verification`，同时更新API/Worker/Dispatcher/Web。默认 `VERIFICATION_ENABLED=false`、`MATERIAL_ENABLED=false`；确认自研sandbox节点已支持WorkspaceService及 `files` 环境后再分别启用。两个功能不需要模型密钥，不向sandbox注入聊天/语音凭据，也不读取主机的动态Skills。
+第五阶段需要先备份并迁移至 `0009_verification`，同时更新API/Worker/Dispatcher/Web。默认 `VERIFICATION_ENABLED=false`、`MATERIAL_ENABLED=false`；确认自研sandbox节点已支持WorkspaceService及 `files` 环境后再分别启用。样例验证还要求已通过原始字节验收的节点（本机检查点 `d1a6654` 或等效版本），其execd与WorkspaceService均支持 `base64-v1` 输出协商、响应确认及严格解码；仅有旧WorkspaceService接口不足以满足字节保真要求。回退旧节点时先关闭 `VERIFICATION_ENABLED`。两个功能不需要模型密钥，不向sandbox注入聊天/语音凭据，也不读取主机的动态Skills。
 
 学习页的“样例验证”先由用户检查并确认输入/预期输出规则，再另行运行当前保存的单文件Python提交；每例10秒/256MiB、每批最多6例、最近24小时5批/每用户1批在途。结果与AI评语分开，记录规则版本和代码SHA256，只证明确认的样例，不能自动提升学习状态。每例使用独立工作区；未知清理继续占在途额度，24小时清理重试不重跑代码。
 
